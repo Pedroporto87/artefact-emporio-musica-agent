@@ -67,7 +67,7 @@ class MusicaAgent:
 
             response = self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=1024,
+                max_tokens=2048,
                 tools=TOOLS_DEFINITION,
                 tool_choice="auto",
                 messages=messages_with_system,
@@ -75,6 +75,7 @@ class MusicaAgent:
 
             # Processar resposta
             choice = response.choices[0]
+            print(f"[DEBUG] finish_reason: {choice.finish_reason}")
 
             if choice.finish_reason == "tool_calls":
                 # LLM quer usar uma ferramenta

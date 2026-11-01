@@ -80,7 +80,8 @@ def main():
             print(f"❌ Erro ao processar mensagem: {e}")
             # Continue mesmo com erro
 
-        print_separator() + "\n"
+        print_separator()
+        print()
 
 
 def run_with_file(input_file: str, output_file: str = None):

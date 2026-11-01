@@ -59,13 +59,18 @@ class MusicaAgent:
             iteration += 1
 
             # Chamar LLM via OpenRouter com as ferramentas
+            # OpenRouter espera system como primeira mensagem, não como parâmetro
+            messages_with_system = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                *self.conversation_history,
+            ]
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=1024,
-                system=SYSTEM_PROMPT,
                 tools=TOOLS_DEFINITION,
                 tool_choice="auto",
-                messages=self.conversation_history,
+                messages=messages_with_system,
             )
 
             # Processar resposta

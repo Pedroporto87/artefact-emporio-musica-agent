@@ -238,7 +238,8 @@ class ProductTools:
         results = []
 
         for _, row in self.loader.products.iterrows():
-            score = fuzz.ratio(name_norm, row["name_normalized"])
+            # token_set_ratio aceita nomes parciais: "takamine gd20" casa com o nome completo do catálogo
+            score = fuzz.token_set_ratio(name_norm.replace("-", ""), row["name_normalized"].replace("-", ""))
             if score >= threshold:
                 prod = {
                     "product_id": int(row["product_id"]),

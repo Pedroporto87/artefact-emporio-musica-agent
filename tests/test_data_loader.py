@@ -53,9 +53,9 @@ def test_normalize_text():
 
 def test_normalize_phone():
     """Testa normalização de telefone."""
-    assert DataLoader._normalize_phone("(67) 99812-3456") == "6799812345"
-    assert DataLoader._normalize_phone("67 99812-3456") == "6799812345"
-    assert DataLoader._normalize_phone("6799812345") == "6799812345"
+    assert DataLoader._normalize_phone("(67) 99812-3456") == "67998123456"
+    assert DataLoader._normalize_phone("67 99812-3456") == "67998123456"
+    assert DataLoader._normalize_phone("67998123456") == "67998123456"
 
     print("✅ test_normalize_phone: OK")
 
@@ -117,7 +117,7 @@ def test_verify_customer_phone():
     assert verified is True, "Cliente 1 deveria ser verificado por phone"
 
     # Phone sem formatação
-    verified2 = loader.verify_customer(1, phone="6799812345")
+    verified2 = loader.verify_customer(1, phone="67998123456")
     assert verified2 is True, "Phone normalizado deveria funcionar"
 
     # Phone errado

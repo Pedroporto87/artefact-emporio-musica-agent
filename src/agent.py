@@ -76,6 +76,12 @@ class MusicaAgent:
             # Processar resposta
             choice = response.choices[0]
             print(f"[DEBUG] finish_reason: {choice.finish_reason}")
+            print(f"[DEBUG] response completa: {response}")
+
+            # Se houver erro, mostrar detalhes
+            if choice.finish_reason == "error":
+                print(f"[ERROR] Detalhes do erro: {choice.message if hasattr(choice, 'message') else 'N/A'}")
+                return "❌ Erro na API: Tente novamente em alguns momentos. Se persistir, verifique a chave OpenRouter."
 
             if choice.finish_reason == "tool_calls":
                 # LLM quer usar uma ferramenta

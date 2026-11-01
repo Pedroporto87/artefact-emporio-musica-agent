@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from typing import Any, Dict, List
 from openai import OpenAI
 import sys
@@ -18,6 +19,15 @@ from prompts import SYSTEM_PROMPT, TOOLS_DEFINITION
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 MAX_TOOL_ROUNDS = 5
+
+BRL_PRICE_RE = re.compile(r"R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)")
+PLAIN_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+DENIAL_RE = re.compile(r"n[ãa]o (trabalhamos|vendemos|temos|possu[ií]mos)", re.IGNORECASE)
+PRODUCT_TOOLS = {"search_products", "search_by_name", "get_product_details", "suggest_alternatives"}
+
+
+def _brl_to_float(text: str) -> float:
+    return round(float(text.replace(".", "").replace(",", ".")), 2)
 
 # prompts.py descreve as ferramentas com JSON Schema; aqui elas viram o formato OpenAI.
 OPENAI_TOOLS = [
@@ -54,6 +64,9 @@ class MusicaAgent:
     def process_message(self, user_message: str) -> str:
         """Processa uma mensagem do cliente e retorna a resposta do agente."""
         self.conversation_history.append({"role": "user", "content": user_message})
+        # Mensagens de correção da checagem de preços: vão para o modelo, mas não ficam no histórico.
+        correction: List[Dict[str, Any]] = []
+        product_tool_called = False
 
         for _ in range(MAX_TOOL_ROUNDS):
             response = self.client.chat.completions.create(
@@ -61,7 +74,7 @@ class MusicaAgent:
                 max_tokens=1024,
                 tools=OPENAI_TOOLS,
                 tool_choice="auto",
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}, *self.conversation_history],
+                messages=[{"role": "system", "content": SYSTEM_PROMPT}, *self.conversation_history, *correction],
             )
             choice = response.choices[0]
             message = choice.message
@@ -85,6 +98,7 @@ class MusicaAgent:
                     except json.JSONDecodeError:
                         args = {}
                     result = self._execute_tool(tc.function.name, args)
+                    product_tool_called |= tc.function.name in PRODUCT_TOOLS
                     if self.verbose:
                         print(f"  [tool] {tc.function.name}({args})")
                     self.conversation_history.append({
@@ -95,6 +109,18 @@ class MusicaAgent:
                 continue
 
             if choice.finish_reason in ("stop", "length") and message.content:
+                problem = self._grounding_problem(message.content, product_tool_called)
+                if problem and not correction:
+                    if self.verbose:
+                        print(f"  [checagem] {problem}")
+                    correction = [
+                        {"role": "assistant", "content": message.content},
+                        {"role": "user", "content": (
+                            f"[verificação automática do sistema, não é o cliente] {problem} "
+                            "Consulte a ferramenta adequada antes de responder ao cliente."
+                        )},
+                    ]
+                    continue
                 self.conversation_history.append({"role": "assistant", "content": message.content})
                 return message.content
 
@@ -103,6 +129,29 @@ class MusicaAgent:
             )
 
         return "Desculpe, não consegui concluir sua solicitação agora. Pode reformular a pergunta? 😕"
+
+    def _grounding_problem(self, text: str, product_tool_called: bool) -> str:
+        """Descreve por que a resposta não está apoiada em dados, ou "" se estiver ok."""
+        ungrounded = self._ungrounded_prices(text)
+        if ungrounded:
+            return f"Sua resposta cita valores que não vieram de nenhuma ferramenta: {ungrounded}."
+        if DENIAL_RE.search(text) and not product_tool_called:
+            return "Sua resposta afirma que a loja não vende/não tem algo sem ter consultado o catálogo."
+        return ""
+
+    def _ungrounded_prices(self, text: str) -> List[str]:
+        """Valores em R$ da resposta que não aparecem em resultados de ferramentas nem nas falas do cliente."""
+        known = set()
+        for msg in self.conversation_history:
+            content = msg.get("content")
+            if not isinstance(content, str):
+                continue
+            if msg["role"] == "tool":
+                known.update(round(float(n), 2) for n in PLAIN_NUMBER_RE.findall(content))
+            elif msg["role"] == "user":
+                known.update(_brl_to_float(p) for p in BRL_PRICE_RE.findall(content))
+                known.update(float(n) for n in re.findall(r"\d+", content))
+        return [f"R$ {p}" for p in BRL_PRICE_RE.findall(text) if _brl_to_float(p) not in known]
 
     def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> Any:
         """Executa uma ferramenta e retorna o resultado."""

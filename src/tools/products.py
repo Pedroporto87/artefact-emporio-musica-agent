@@ -21,33 +21,35 @@ class ProductTools:
         price_max: Optional[float] = None,
         in_stock_only: bool = True,
         limit: int = 10,
-    ) -> List[Dict]:
+    ) -> Dict:
         """
         Busca produtos com filtros.
 
-        Args:
-            category_name: Nome da categoria (ex: "Violões")
-            brand: Marca/fabricante (ex: "Yamaha")
-            price_min: Preço mínimo em R$
-            price_max: Preço máximo em R$
-            in_stock_only: Se True, apenas produtos com estoque > 0
-            limit: Número máximo de resultados
-
         Returns:
-            Lista de produtos com id, name, price_brl, stock, description, promotion
+            Dict com "status" e "produtos". O status separa "a loja não vende isso"
+            (nao_vendemos) de "vendemos, mas acabou" (sem_estoque), para o agente
+            não confundir os dois casos.
         """
         if self.loader.products is None:
             self.loader.load_all()
 
         results = self.loader.products.copy()
 
-        # Filtro por categoria
         if category_name:
             cat_id = self._find_category_id(category_name)
-            if cat_id:
+            if cat_id is not None:
                 results = results[results["category_id"] == cat_id]
-            else:
-                return []  # Categoria não encontrada
+            if cat_id is None or results.empty:
+                return {
+                    "status": "nao_vendemos",
+                    "mensagem": (
+                        f"A loja não trabalha com '{category_name}'. Responda apenas que não "
+                        "trabalhamos com isso e ofereça as categorias abaixo. NÃO cite nenhum "
+                        "produto ou preço sem antes chamar search_products para a categoria escolhida."
+                    ),
+                    "categorias_que_vendemos": self.categories_with_products(),
+                    "produtos": [],
+                }
 
         # Filtro por marca (busca no nome normalizado)
         if brand:
@@ -62,9 +64,26 @@ class ProductTools:
         if price_max is not None:
             results = results[results["price_brl"] <= price_max]
 
-        # Filtro por estoque
+        if results.empty:
+            return {
+                "status": "nenhum_resultado",
+                "mensagem": "Nenhum produto do catálogo atende a esses filtros (marca/preço).",
+                "produtos": [],
+            }
+
         if in_stock_only:
-            results = results[results["stock_quantity"] > 0]
+            in_stock = results[results["stock_quantity"] > 0]
+            if in_stock.empty:
+                return {
+                    "status": "sem_estoque",
+                    "mensagem": "Existem produtos com esses filtros, mas todos estão sem estoque.",
+                    "produtos_sem_estoque": [
+                        {"product_id": int(r["product_id"]), "name": r["name"]}
+                        for _, r in results.head(limit).iterrows()
+                    ],
+                    "produtos": [],
+                }
+            results = in_stock
 
         # Ordenar por preço
         results = results.sort_values("price_brl")
@@ -91,7 +110,13 @@ class ProductTools:
 
             output.append(prod)
 
-        return output
+        return {"status": "ok", "produtos": output}
+
+    def categories_with_products(self) -> List[str]:
+        """Nomes das categorias que têm ao menos um produto no catálogo."""
+        ids = set(self.loader.products["category_id"].unique())
+        cats = self.loader.categories
+        return cats[cats["category_id"].isin(ids)]["name"].tolist()
 
     def get_product_details(self, product_id: int) -> Optional[Dict]:
         """
@@ -256,21 +281,43 @@ class ProductTools:
 
                 results.append(prod)
 
-        # Ordenar por similaridade (descendente)
+        if not results:
+            return {
+                "status": "nao_vendemos",
+                "mensagem": (
+                    f"Nenhum produto chamado '{product_name}' no catálogo da loja. Responda que não "
+                    "trabalhamos com esse item e ofereça as categorias abaixo. NÃO cite nenhum "
+                    "produto ou preço sem antes chamar search_products."
+                ),
+                "categorias_que_vendemos": self.categories_with_products(),
+                "produtos": [],
+            }
         results = sorted(results, key=lambda x: x["similarity_score"], reverse=True)
-        return results
+        return {"status": "ok", "produtos": results}
 
     def _find_category_id(self, category_name: str) -> Optional[int]:
         """Encontra ID da categoria por nome (fuzzy)."""
         if self.loader.categories is None:
             self.loader.categories = self.loader._load_categories()
 
-        cat_norm = self.loader._normalize_text(category_name)
+        cat_norm = self._singularize(self.loader._normalize_text(category_name))
 
         for _, row in self.loader.categories.iterrows():
-            cat_name_norm = self.loader._normalize_text(row["name"])
-            score = fuzz.ratio(cat_norm, cat_name_norm)
-            if score >= 80:
+            cat_name_norm = self._singularize(self.loader._normalize_text(row["name"]))
+            # Limiar alto: com 80, "violinos" casava com "violoes".
+            if fuzz.token_set_ratio(cat_norm, cat_name_norm) >= 90:
                 return int(row["category_id"])
 
         return None
+
+    @staticmethod
+    def _singularize(text: str) -> str:
+        """Plural simples do português, palavra a palavra: violoes -> violao, guitarras -> guitarra."""
+        words = []
+        for w in text.split():
+            if w.endswith(("oes", "aes")):
+                w = w[:-3] + "ao"
+            elif w.endswith("s") and len(w) > 3:
+                w = w[:-1]
+            words.append(w)
+        return " ".join(words)

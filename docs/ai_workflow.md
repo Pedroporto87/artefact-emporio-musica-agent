@@ -318,3 +318,16 @@
 - **Workflow real:** Claude Chat para planejamento/análise; Claude Code (VS Code extension) para implementação
 
 ---
+
+## Correções após o primeiro teste real (01/11/2026)
+
+O registro acima foi escrito antes de o agente ser executado. Quando o Pedro rodou na máquina dele, apareceram problemas:
+
+| O que o Pedro pediu / observou | O que o Claude Code fez | O que o Pedro revisou |
+|---|---|---|
+| Rodar o agente com a chave OpenRouter (sem pagar API da Anthropic) | Migrou para o SDK OpenAI apontando para o OpenRouter | Forneceu a chave e escolheu o modelo |
+| "Estamos em looping no erro" (`MALFORMED_FUNCTION_CALL`) | Achou a causa: modelo fixo no código, tools no formato da Anthropic, resultados sem `tool_call_id`. Corrigiu e passou a testar de ponta a ponta antes de entregar | Confirmou que funcionou |
+| Agente dizia "sem estoque" para atabaque | Ferramentas passaram a devolver `status` (não vendemos / sem estoque / sem resultado) e foi criada uma checagem que barra preço sem origem em ferramenta | Definiu a regra: se não está no banco, a loja não vende |
+| Melhorar as informações da empresa vindas do PDF | Manual inteiro no system prompt (~3 mil tokens) no lugar da busca por palavra-chave; ferramenta de horário com feriados; PIX calculado no código; acessórios recusados conforme o manual | Aprovou não editar o PDF original e documentar as divergências como suposições |
+
+---

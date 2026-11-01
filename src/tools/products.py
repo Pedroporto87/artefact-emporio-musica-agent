@@ -1,5 +1,6 @@
 """Ferramentas para busca e consulta de produtos."""
 
+import re
 from typing import List, Dict, Optional
 from fuzzywuzzy import fuzz
 import sys
@@ -39,7 +40,17 @@ class ProductTools:
             cat_id = self._find_category_id(category_name)
             if cat_id is not None:
                 results = results[results["category_id"] == cat_id]
-            if cat_id is None or results.empty:
+                if results.empty:
+                    return {
+                        "status": "categoria_sem_produtos",
+                        "mensagem": (
+                            f"A loja trabalha com '{self.loader.get_category_name(cat_id)}', mas não há "
+                            "modelos dessa categoria no catálogo agora. NÃO cite produtos nem preços."
+                        ),
+                        "categorias_que_vendemos": self.categories_with_products(),
+                        "produtos": [],
+                    }
+            if cat_id is None:
                 return {
                     "status": "nao_vendemos",
                     "mensagem": (
@@ -107,6 +118,7 @@ class ProductTools:
             prod_with_promo = self.loader.get_product_with_promotion(int(row["product_id"]))
             if prod_with_promo and prod_with_promo["promotion"]:
                 prod["promotion"] = prod_with_promo["promotion"]
+            prod["pix_price"] = prod_with_promo["pix_price"]
 
             output.append(prod)
 
@@ -145,6 +157,7 @@ class ProductTools:
             "category": self.loader.get_category_name(prod["category_id"]),
             "specs": prod.get("specs", {}),
             "promotion": prod.get("promotion"),
+            "pix_price": prod.get("pix_price"),
             "status": prod.get("status", "active"),
         }
 
@@ -240,12 +253,13 @@ class ProductTools:
             prod_with_promo = self.loader.get_product_with_promotion(int(row["product_id"]))
             if prod_with_promo and prod_with_promo["promotion"]:
                 prod["promotion"] = prod_with_promo["promotion"]
+            prod["pix_price"] = prod_with_promo["pix_price"]
 
             output.append(prod)
 
         return output
 
-    def search_by_name(self, product_name: str, threshold: int = 80) -> List[Dict]:
+    def search_by_name(self, product_name: str, threshold: int = 80) -> Dict:
         """
         Busca produtos por nome com fuzzy matching.
 
@@ -278,16 +292,17 @@ class ProductTools:
                 prod_with_promo = self.loader.get_product_with_promotion(int(row["product_id"]))
                 if prod_with_promo and prod_with_promo["promotion"]:
                     prod["promotion"] = prod_with_promo["promotion"]
+                prod["pix_price"] = prod_with_promo["pix_price"]
 
                 results.append(prod)
 
         if not results:
             return {
-                "status": "nao_vendemos",
+                "status": "nao_encontrado",
                 "mensagem": (
-                    f"Nenhum produto chamado '{product_name}' no catálogo da loja. Responda que não "
-                    "trabalhamos com esse item e ofereça as categorias abaixo. NÃO cite nenhum "
-                    "produto ou preço sem antes chamar search_products."
+                    f"Nenhum produto chamado '{product_name}' no catálogo. Não diga 'sem estoque'. "
+                    "Se for um tipo de instrumento, use search_products com a categoria para saber se "
+                    "a loja trabalha com ele. NÃO cite produto ou preço sem consultar uma ferramenta."
                 ),
                 "categorias_que_vendemos": self.categories_with_products(),
                 "produtos": [],
@@ -308,7 +323,17 @@ class ProductTools:
             if fuzz.token_set_ratio(cat_norm, cat_name_norm) >= 90:
                 return int(row["category_id"])
 
+        # Instrumento citado só na descrição: "violino" está em "Cordas Orquestrais".
+        query_words = set(self._words(category_name)) - {"de", "do", "da", "e"}
+        for _, row in self.loader.categories.iterrows():
+            if query_words and query_words <= set(self._words(row["description"])):
+                return int(row["category_id"])
+
         return None
+
+    def _words(self, text: str) -> List[str]:
+        clean = re.sub(r"[^a-z ]", " ", self.loader._normalize_text(text))
+        return self._singularize(clean).split()
 
     @staticmethod
     def _singularize(text: str) -> str:

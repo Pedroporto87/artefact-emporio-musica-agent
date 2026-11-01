@@ -1,186 +1,68 @@
-"""Ferramentas para consulta de políticas da loja (extraído do PDF)."""
+"""Manual de políticas (PDF) e status de funcionamento da loja."""
 
-from typing import Optional, Dict
+from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
-import sys
+from typing import Dict, Optional, Tuple
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pdfplumber
 
-try:
-    import pdfplumber
-    PDF_AVAILABLE = True
-except ImportError:
-    PDF_AVAILABLE = False
+MANUAL_PATH = Path(__file__).resolve().parents[2] / "data" / "políticas_da_loja.pdf"
+
+# Mato Grosso do Sul não tem horário de verão desde 2019: UTC-4 fixo, sem depender de tzdata.
+CAMPO_GRANDE_TZ = timezone(timedelta(hours=-4))
+
+WEEKDAYS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
+
+# Seção 2 do manual: seg-sex 09-18, sáb 09-13, domingo e feriados fechado.
+OPENING_HOURS: Dict[int, Tuple[int, int]] = {0: (9, 18), 1: (9, 18), 2: (9, 18), 3: (9, 18), 4: (9, 18), 5: (9, 13)}
+
+# Só feriados nacionais de data fixa; os móveis (Carnaval, Sexta-feira Santa, Corpus Christi) ficam de fora.
+FIXED_HOLIDAYS = {
+    (1, 1): "Confraternização Universal",
+    (4, 21): "Tiradentes",
+    (5, 1): "Dia do Trabalho",
+    (9, 7): "Independência do Brasil",
+    (10, 12): "Nossa Senhora Aparecida",
+    (11, 2): "Finados",
+    (11, 15): "Proclamação da República",
+    (11, 20): "Dia da Consciência Negra",
+    (12, 25): "Natal",
+}
 
 
-class PolicyTools:
-    def __init__(self, pdf_path: str = "data/políticas_da_loja.pdf"):
-        self.pdf_path = Path(pdf_path)
-        self._policies_cache = None
+@lru_cache(maxsize=1)
+def load_manual_text(path: Path = MANUAL_PATH) -> str:
+    """Texto integral do manual (~11 mil caracteres): pequeno o bastante para ir inteiro no prompt."""
+    with pdfplumber.open(path) as pdf:
+        return "\n".join(page.extract_text() or "" for page in pdf.pages)
 
-    def load_policies(self) -> Optional[str]:
-        """Carrega e faz cache do texto do PDF de políticas."""
-        if self._policies_cache is not None:
-            return self._policies_cache
 
-        if not self.pdf_path.exists():
-            return None
+def _hours_for(day: datetime) -> Optional[Tuple[int, int]]:
+    if (day.month, day.day) in FIXED_HOLIDAYS:
+        return None
+    return OPENING_HOURS.get(day.weekday())
 
-        if not PDF_AVAILABLE:
-            return None  # pdfplumber não instalado
 
-        try:
-            with pdfplumber.open(self.pdf_path) as pdf:
-                text_parts = []
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if text:
-                        text_parts.append(text)
-                full_text = "\n".join(text_parts)
-                self._policies_cache = full_text
-                return full_text
-        except Exception as e:
-            print(f"⚠️ Erro ao extrair PDF: {e}")
-            return None
+def _next_opening(now: datetime) -> str:
+    for offset in range(8):
+        day = now + timedelta(days=offset)
+        hours = _hours_for(day)
+        if hours is None or (offset == 0 and now.hour >= hours[0]):
+            continue
+        when = "hoje" if offset == 0 else f"{WEEKDAYS[day.weekday()]}, {day:%d/%m}"
+        return f"{when} às {hours[0]:02d}:00"
+    return "consulte a equipe"
 
-    def get_policies_excerpt(self, topic: str) -> Optional[Dict]:
-        """
-        Busca um trecho relevante das políticas por tópico.
 
-        Args:
-            topic: Tópico a buscar (ex: "devolução", "horário", "pagamento")
-
-        Returns:
-            Dicionário com topic, excerpt (trecho relevante), relevance_score
-        """
-        policies = self.load_policies()
-        if not policies:
-            return {
-                "error": "Políticas não disponíveis",
-                "message": "Desculpe, não conseguimos acessar o manual de políticas. "
-                          "Por favor, entre em contato com nosso atendimento.",
-            }
-
-        # Normalizar tópico
-        topic_lower = topic.lower()
-
-        # Mapeamento de palavras-chave para seções
-        keyword_map = {
-            "devolução": ["devolução", "devolver", "retorno", "troca"],
-            "troca": ["troca", "trocar", "devolver"],
-            "horário": ["horário", "horário de funcionamento", "abre", "fecha", "atendimento"],
-            "pagamento": ["pagamento", "pagar", "formas de pagamento", "cartão", "pix", "boleto"],
-            "garantia": ["garantia", "defeito", "conserto"],
-            "envio": ["envio", "entrega", "frete", "rastreamento", "tracking"],
-            "política": ["política", "política de", "regra"],
-        }
-
-        # Encontrar palavras-chave relevantes
-        relevant_keywords = []
-        for key, keywords in keyword_map.items():
-            if topic_lower == key or any(kw in topic_lower for kw in keywords):
-                relevant_keywords.extend(keywords)
-
-        # Se nenhuma palavra-chave, usar o tópico original
-        if not relevant_keywords:
-            relevant_keywords = [topic_lower]
-
-        # Buscar linhas relevantes
-        lines = policies.split("\n")
-        relevant_lines = []
-
-        for line in lines:
-            line_lower = line.lower()
-            for keyword in relevant_keywords:
-                if keyword in line_lower:
-                    relevant_lines.append(line)
-                    break
-
-        if not relevant_lines:
-            return {
-                "topic": topic,
-                "excerpt": None,
-                "message": "Desculpe, não encontramos informações sobre esse assunto. "
-                          "Por favor, entre em contato com nosso atendimento.",
-            }
-
-        # Retornar as linhas relevantes (limitado a 500 caracteres)
-        excerpt = "\n".join(relevant_lines[:5])  # Primeiras 5 linhas relevantes
-        if len(excerpt) > 500:
-            excerpt = excerpt[:500] + "..."
-
-        return {
-            "topic": topic,
-            "excerpt": excerpt,
-            "found": True,
-        }
-
-    def get_store_info(self) -> Dict:
-        """Retorna informações básicas da loja."""
-        return {
-            "name": "Empório da Música",
-            "city": "Campo Grande",
-            "state": "MS",
-            "message": "Bem-vindo ao Empório da Música! 🎵 "
-                      "Somos especializados em instrumentos musicais de qualidade. "
-                      "Como posso ajudar você hoje?",
-        }
-
-    def get_contact_info(self) -> Dict:
-        """Retorna informações de contato da loja (extrair do PDF se disponível)."""
-        # Se tiver no PDF, extrair de lá; caso contrário, retornar padrão
-        policies = self.load_policies()
-        if policies and "contato" in policies.lower():
-            # TODO: parsear contato do PDF
-            pass
-
-        return {
-            "city": "Campo Grande",
-            "state": "MS",
-            "message": "Para dúvidas adicionais, entre em contato com nosso atendimento. "
-                      "Será um prazer ajudar! 😊",
-        }
-
-    def query_policies(self, question: str) -> str:
-        """
-        Responde uma pergunta sobre políticas usando o texto do PDF.
-
-        Args:
-            question: Pergunta do cliente
-
-        Returns:
-            Resposta baseada nas políticas, ou mensagem de encaminhamento
-        """
-        policies = self.load_policies()
-        if not policies:
-            return ("Desculpe, não conseguimos acessar o manual de políticas. "
-                   "Por favor, entre em contato com nosso atendimento. 😊")
-
-        # Buscar palavras-chave da pergunta
-        question_lower = question.lower()
-
-        # Palavras-chave comuns
-        if any(word in question_lower for word in ["devolv", "retorn", "trocar"]):
-            return self.get_policies_excerpt("devolução").get(
-                "excerpt",
-                "Temos uma política flexible de devoluções. "
-                "Entre em contato para mais detalhes! 😊"
-            )
-        elif any(word in question_lower for word in ["horário", "abre", "fecha"]):
-            return self.get_policies_excerpt("horário").get(
-                "excerpt",
-                "Você pode consultar nossos horários de funcionamento pelo nosso site. 😊"
-            )
-        elif any(word in question_lower for word in ["pagamen", "pagar", "cartão", "pix"]):
-            return self.get_policies_excerpt("pagamento").get(
-                "excerpt",
-                "Aceitamos várias formas de pagamento. "
-                "Qual você prefere? 💳"
-            )
-        else:
-            # Pergunta genérica sobre políticas
-            return self.get_policies_excerpt(question).get(
-                "excerpt",
-                "Sua pergunta é interessante! Por favor, entre em contato com nosso atendimento "
-                "para detalhes específicos. 😊"
-            )
+def store_status(now: Optional[datetime] = None) -> Dict:
+    now = now or datetime.now(CAMPO_GRANDE_TZ)
+    hours = _hours_for(now)
+    is_open = hours is not None and hours[0] <= now.hour < hours[1]
+    return {
+        "agora": f"{WEEKDAYS[now.weekday()]}, {now:%d/%m/%Y %H:%M}",
+        "feriado": FIXED_HOLIDAYS.get((now.month, now.day)),
+        "loja_aberta_agora": is_open,
+        "horario_de_hoje": f"{hours[0]:02d}:00 às {hours[1]:02d}:00" if hours else "fechado",
+        "proxima_abertura": None if is_open else _next_opening(now),
+    }

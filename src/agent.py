@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from data_loader import DataLoader
 from tools.products import ProductTools
 from tools.orders import OrderTools
-from tools.policies import PolicyTools
-from prompts import SYSTEM_PROMPT, TOOLS_DEFINITION
+from tools.policies import load_manual_text, store_status
+from prompts import build_system_prompt, TOOLS_DEFINITION
 
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
@@ -24,6 +24,8 @@ BRL_PRICE_RE = re.compile(r"R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,
 PLAIN_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 DENIAL_RE = re.compile(r"n[ãa]o (trabalhamos|vendemos|temos|possu[ií]mos)", re.IGNORECASE)
 PRODUCT_TOOLS = {"search_products", "search_by_name", "get_product_details", "suggest_alternatives"}
+# Seção 7.1 do manual: acessórios não são vendidos, então negar não exige consultar o catálogo.
+ACCESSORY_RE = re.compile(r"corda|palheta|cabo|case|pedal|pedais|amplificador|acess[óo]rio", re.IGNORECASE)
 
 
 def _brl_to_float(text: str) -> float:
@@ -57,7 +59,7 @@ class MusicaAgent:
 
         self.product_tools = ProductTools(self.loader)
         self.order_tools = OrderTools(self.loader)
-        self.policy_tools = PolicyTools()
+        self.system_prompt = build_system_prompt(load_manual_text())
 
         self.conversation_history: List[Dict[str, Any]] = []
 
@@ -74,7 +76,7 @@ class MusicaAgent:
                 max_tokens=1024,
                 tools=OPENAI_TOOLS,
                 tool_choice="auto",
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}, *self.conversation_history, *correction],
+                messages=[{"role": "system", "content": self.system_prompt}, *self.conversation_history, *correction],
             )
             choice = response.choices[0]
             message = choice.message
@@ -117,7 +119,8 @@ class MusicaAgent:
                         {"role": "assistant", "content": message.content},
                         {"role": "user", "content": (
                             f"[verificação automática do sistema, não é o cliente] {problem} "
-                            "Consulte a ferramenta adequada antes de responder ao cliente."
+                            "Consulte a ferramenta adequada antes de responder ao cliente. Responda direto "
+                            "ao cliente, sem mencionar esta verificação nem pedir desculpas por ela."
                         )},
                     ]
                     continue
@@ -135,13 +138,13 @@ class MusicaAgent:
         ungrounded = self._ungrounded_prices(text)
         if ungrounded:
             return f"Sua resposta cita valores que não vieram de nenhuma ferramenta: {ungrounded}."
-        if DENIAL_RE.search(text) and not product_tool_called:
+        if DENIAL_RE.search(text) and not product_tool_called and not ACCESSORY_RE.search(text):
             return "Sua resposta afirma que a loja não vende/não tem algo sem ter consultado o catálogo."
         return ""
 
     def _ungrounded_prices(self, text: str) -> List[str]:
-        """Valores em R$ da resposta que não aparecem em resultados de ferramentas nem nas falas do cliente."""
-        known = set()
+        """Valores em R$ da resposta que não aparecem no manual, nas ferramentas nem nas falas do cliente."""
+        known = {_brl_to_float(p) for p in BRL_PRICE_RE.findall(self.system_prompt)}
         for msg in self.conversation_history:
             content = msg.get("content")
             if not isinstance(content, str):
@@ -189,12 +192,8 @@ class MusicaAgent:
                 return self.order_tools.get_customer_orders(
                     customer_verification=tool_input.get("customer_verification"),
                 )
-            if tool_name == "get_policies_excerpt":
-                return self.policy_tools.get_policies_excerpt(topic=tool_input.get("topic"))
-            if tool_name == "get_store_info":
-                return self.policy_tools.get_store_info()
-            if tool_name == "query_policies":
-                return self.policy_tools.query_policies(question=tool_input.get("question"))
+            if tool_name == "get_store_status":
+                return store_status()
             return {"error": f"Ferramenta desconhecida: {tool_name}"}
         except Exception as e:
             return {"error": str(e)}

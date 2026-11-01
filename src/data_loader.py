@@ -171,6 +171,8 @@ class DataLoader:
         else:
             prod_dict["promotion"] = None
 
+        # Manual 3 e 6.2: PIX dá 5% sobre o preço de tabela e não acumula com promoção.
+        prod_dict["pix_price"] = None if prod_dict["promotion"] else round(base_price * 0.95, 2)
         return prod_dict
 
     def verify_customer(

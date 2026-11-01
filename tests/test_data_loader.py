@@ -147,6 +147,22 @@ def test_get_product_with_promotion():
     print("✅ test_get_product_with_promotion: OK")
 
 
+def test_pix_price_not_cumulative():
+    """PIX dá 5% só fora de promoção (manual, seções 3 e 6.2)."""
+    loader = DataLoader()
+    loader.load_all()
+
+    takamine = loader.get_product_with_promotion(95)  # R$ 2.199, sem promoção ativa
+    assert takamine["promotion"] is None
+    assert takamine["pix_price"] == 2089.05
+
+    promo = loader.get_product_with_promotion(127)  # promoção ativa "Oferta Especial"
+    assert promo["promotion"] is not None
+    assert promo["pix_price"] is None
+
+    print("✅ test_pix_price_not_cumulative: OK")
+
+
 def test_nonexistent_product():
     """Testa busca de produto inexistente."""
     loader = DataLoader()
@@ -170,6 +186,7 @@ if __name__ == "__main__":
     test_verify_customer_email()
     test_verify_customer_phone()
     test_get_product_with_promotion()
+    test_pix_price_not_cumulative()
     test_nonexistent_product()
 
     print("\n✅ Todos os testes passaram!")

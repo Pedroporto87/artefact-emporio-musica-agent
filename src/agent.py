@@ -1,8 +1,8 @@
-"""Agent loop com ReAct e function calling do Claude."""
+"""Agent loop com ReAct e function calling via OpenRouter."""
 
 import json
 from typing import Any, Optional, Dict, List
-from anthropic import Anthropic
+from openai import OpenAI
 import sys
 from pathlib import Path
 
@@ -17,8 +17,11 @@ from prompts import SYSTEM_PROMPT, TOOLS_DEFINITION
 
 class MusicaAgent:
     def __init__(self, api_key: str):
-        self.client = Anthropic(api_key=api_key)
-        self.model = "claude-3-5-haiku-20241022"
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
+        self.model = "google/gemini-3.6-flash"
 
         # Inicializar dados
         self.loader = DataLoader()
@@ -55,54 +58,64 @@ class MusicaAgent:
         while iteration < max_iterations:
             iteration += 1
 
-            # Chamar Claude com as ferramentas
-            response = self.client.messages.create(
+            # Chamar LLM via OpenRouter com as ferramentas
+            response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=1024,
                 system=SYSTEM_PROMPT,
                 tools=TOOLS_DEFINITION,
+                tool_choice="auto",
                 messages=self.conversation_history,
             )
 
             # Processar resposta
-            if response.stop_reason == "tool_use":
-                # Claude quer usar uma ferramenta
+            choice = response.choices[0]
+
+            if choice.finish_reason == "tool_calls":
+                # LLM quer usar uma ferramenta
+                message = choice.message
                 tool_results = []
 
-                for content in response.content:
-                    if content.type == "tool_use":
-                        tool_name = content.name
-                        tool_input = content.input
-                        tool_use_id = content.id
+                for tool_call in message.tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_input = json.loads(tool_call.function.arguments)
+                    tool_use_id = tool_call.id
 
-                        # Executar ferramenta
-                        result = self._execute_tool(tool_name, tool_input)
+                    # Executar ferramenta
+                    result = self._execute_tool(tool_name, tool_input)
 
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": tool_use_id,
-                            "content": json.dumps(result, ensure_ascii=False, indent=2),
-                        })
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_call_id": tool_use_id,
+                        "content": json.dumps(result, ensure_ascii=False, indent=2),
+                    })
 
-                # Adicionar resposta do Claude ao histórico
+                # Adicionar resposta do LLM ao histórico
                 self.conversation_history.append({
                     "role": "assistant",
-                    "content": response.content,
+                    "content": message.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in message.tool_calls
+                    ],
                 })
 
                 # Adicionar resultados das ferramentas
                 self.conversation_history.append({
-                    "role": "user",
-                    "content": tool_results,
+                    "role": "tool",
+                    "content": json.dumps(tool_results, ensure_ascii=False),
                 })
 
-            elif response.stop_reason == "end_turn":
-                # Claude finalizou com resposta texto
-                final_response = ""
-                for content in response.content:
-                    if hasattr(content, "text"):
-                        final_response = content.text
-                        break
+            elif choice.finish_reason == "stop":
+                # LLM finalizou com resposta texto
+                final_response = choice.message.content or ""
 
                 # Adicionar resposta final ao histórico
                 self.conversation_history.append({
@@ -113,7 +126,7 @@ class MusicaAgent:
                 return final_response
 
             else:
-                # Outro stop_reason (improvável)
+                # Outro finish_reason (improvável)
                 return "Desculpe, ocorreu um erro ao processar sua mensagem. 😕"
 
         return "Desculpe, não consegui processar sua solicitação após várias tentativas. 😕"

@@ -31,12 +31,13 @@ def main():
     """Função principal - loop de conversa."""
     # Carregar variáveis de ambiente
     load_dotenv()
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = os.getenv("LLM_API_KEY")
 
     if not api_key:
-        print("❌ Erro: ANTHROPIC_API_KEY não definida!")
-        print("   Por favor, configure a variável de ambiente ANTHROPIC_API_KEY")
-        print("   ou crie um arquivo .env com: ANTHROPIC_API_KEY=sua_chave_aqui")
+        print("❌ Erro: LLM_API_KEY não definida!")
+        print("   Por favor, configure a variável de ambiente LLM_API_KEY")
+        print("   ou crie um arquivo .env com: LLM_API_KEY=sua_chave_openrouter")
+        print("   Obtenha uma chave gratuita em: https://openrouter.ai")
         sys.exit(1)
 
     # Inicializar agente

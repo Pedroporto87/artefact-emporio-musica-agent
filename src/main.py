@@ -49,7 +49,9 @@ def interactive():
 
 def from_file(input_file: str, output_file: str = None):
     agent = build_agent()
-    messages = [line.strip() for line in Path(input_file).read_text(encoding="utf-8").splitlines() if line.strip()]
+    # utf-8-sig: o Bloco de Notas e o PowerShell 5 gravam BOM no início do arquivo.
+    text = Path(input_file).read_text(encoding="utf-8-sig")
+    messages = [line.strip() for line in text.splitlines() if line.strip()]
     transcript = []
     for message in messages:
         reply = agent.process_message(message)

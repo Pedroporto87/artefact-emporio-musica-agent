@@ -6,6 +6,7 @@
 
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -55,7 +56,11 @@ def from_file(input_file: str, output_file: str = None):
         print(f"Você: {message}\nMarina: {reply}\n")
         transcript.append(f"**Cliente:** {message}\n\n**Marina:** {reply}\n")
     if output_file:
-        Path(output_file).write_text("\n---\n\n".join(transcript), encoding="utf-8")
+        header = (
+            f"<!-- Gerado por `python src/main.py {input_file} {output_file}` em "
+            f"{datetime.now():%d/%m/%Y %H:%M}, modelo {agent.model}. Texto não editado. -->\n\n"
+        )
+        Path(output_file).write_text(header + "\n---\n\n".join(transcript), encoding="utf-8")
         print(f"Conversa salva em {output_file}")
 
 

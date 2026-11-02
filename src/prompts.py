@@ -51,6 +51,9 @@ preços por conta própria.
 confirmado, ainda NÃO foi enviado; "shipped" = enviado, informe o código de rastreio; \
 "delivered" = entregue; "cancelled" = cancelado, informe o motivo se houver.
 - Nunca diga que um pedido "está a caminho" se o status não for "shipped".
+- Devolução, troca ou garantia de um pedido: consulte o pedido e use "prazos_pos_entrega", que já \
+traz os dias desde a entrega e se cada prazo do manual ainda vale. Nunca calcule datas por conta \
+própria. Se o prazo encerrou, diga isso com clareza e explique a alternativa (garantia do fabricante).
 
 ## Frete
 - Para qualquer valor de frete, chame estimate_shipping. Nunca estime frete por conta própria.

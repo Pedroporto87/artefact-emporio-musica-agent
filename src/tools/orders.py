@@ -1,10 +1,19 @@
 """Consulta de pedidos. Nenhum dado sai sem conferir e-mail ou telefone do cliente."""
 
+from datetime import date, datetime
 from typing import Dict, List, Optional
 
 import pandas as pd
 
 from data_loader import DataLoader
+from tools.policies import CAMPO_GRANDE_TZ
+
+# Manual 4.1, 4.2 e 8.1, contados a partir do recebimento.
+DEADLINES_AFTER_DELIVERY = {
+    "arrependimento_7_dias": 7,
+    "troca_por_defeito_30_dias": 30,
+    "garantia_legal_90_dias": 90,
+}
 
 STATUS_DESCRIPTIONS = {
     "pending": "Pedido recebido, aguardando processamento.",
@@ -21,6 +30,21 @@ def _date(value) -> Optional[str]:
 
 def _text(value) -> Optional[str]:
     return value if pd.notna(value) else None
+
+
+def deadlines_after_delivery(delivered_on: date, today: Optional[date] = None) -> Dict:
+    """O modelo não sabe a data de hoje nem conta dias: o prazo de devolução sai calculado daqui."""
+    today = today or datetime.now(CAMPO_GRANDE_TZ).date()
+    days = (today - delivered_on).days
+    return {
+        "data_de_entrega_considerada": str(delivered_on),
+        "hoje": str(today),
+        "dias_desde_a_entrega": days,
+        **{name: ("dentro do prazo" if days <= limit else "prazo encerrado")
+           for name, limit in DEADLINES_AFTER_DELIVERY.items()},
+        "observacao": "Fora da garantia legal, a garantia do fabricante (6 meses a 2 anos) pode valer; "
+                      "a loja pode intermediar (manual 4.2 e 8.2).",
+    }
 
 
 class OrderTools:
@@ -44,7 +68,7 @@ class OrderTools:
                     "mensagem": "E-mail ou telefone não conferem com o pedido. Peça para o cliente conferir."}
 
         items = self.loader.order_items[self.loader.order_items["order_id"] == order_id]
-        return {
+        result = {
             "status": "ok",
             "order_id": int(order["order_id"]),
             "order_status": order["status"],
@@ -57,6 +81,10 @@ class OrderTools:
             "estimated_delivery": _date(order["estimated_delivery"]),
             "notes": _text(order["notes"]),
         }
+        # O CSV não tem a data real de entrega; para pedidos entregues, vale a data estimada.
+        if order["status"] == "delivered" and pd.notna(order["estimated_delivery"]):
+            result["prazos_pos_entrega"] = deadlines_after_delivery(order["estimated_delivery"].date())
+        return result
 
     def get_customer_orders(self, customer_verification: str) -> List[Dict]:
         customer_id = self._find_customer(customer_verification)

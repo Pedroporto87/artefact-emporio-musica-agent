@@ -75,13 +75,14 @@ Cliente ──► Home page (src/static)  ──► FastAPI (src/web.py) ─┐
                                               MusicaAgent (src/agent.py)
                          system prompt = persona + regras + MANUAL DA LOJA (PDF inteiro)
                                                                │  function calling
-               ┌───────────────────────────┬───────────────────┼─────────────────────┐
-               ▼                           ▼                   ▼                     ▼
-   ProductTools (catálogo)        OrderTools (pedidos)   get_store_status     Checagem de respostas
-   busca, detalhes, promoções,    status com verificação  (data/hora e         (preço sem origem,
-   alternativas, preço PIX        de identidade           loja aberta?)        negação sem consulta)
-               └───────────────────────────┴──────────────┘
-                                 DataLoader (CSVs limpos em pandas)
+        ┌──────────────────────┬──────────────────────┼──────────────────────┬──────────────────────┐
+        ▼                      ▼                      ▼                      ▼                      ▼
+  ProductTools           OrderTools            estimate_shipping      get_store_status       Checagem da resposta
+  busca, detalhes,       status com            ViaCEP + regra do      data/hora e            preço sem origem,
+  promoções, PIX,        verificação e         manual + Melhor        loja aberta?           negação sem consulta
+  alternativas           prazos de devolução   Envio
+        └──────────────────────┴──────────────────────┘
+               DataLoader (CSVs limpos em pandas)
 ```
 
 O LLM decide **o que** consultar e **como** falar. Tudo o que é dado (preço, estoque, status, horário, desconto) vem de código determinístico.
@@ -140,6 +141,7 @@ Se uma das regras falhar, o modelo recebe o problema e reescreve a resposta, uma
 - **Preço no PIX:** o código calcula 5% de desconto e devolve `null` quando o produto está em promoção, porque o manual diz que os descontos não acumulam.
 - **Promoção vigente:** o preço final é calculado a partir do `discount_percent` da promoção com `is_active = 1`.
 - **Mais caro e mais barato:** `search_products` recebe `order` (`maior_preco` ou `menor_preco`) e informa `total_encontrado`. Antes, a lista vinha sempre do mais barato para o mais caro e cortada em 10 itens. Ao ouvir "qual o violão mais caro?", a Marina escolhia dentro dos 10 mais baratos e respondia R$ 429,90, quando o mais caro custa R$ 12.000,00.
+- **Prazos de devolução e garantia:** para pedidos entregues, `check_order_status` devolve os dias desde a entrega e se cada prazo do manual ainda vale (arrependimento em 7 dias, troca por defeito em 30, garantia legal em 90). Esse caso apareceu ao gerar os exemplos: a Marina disse que um pedido entregue há 352 dias ainda estava "dentro do prazo de 7 dias".
 - **Loja aberta agora:** `get_store_status` usa o horário de Campo Grande (UTC-4, sem horário de verão desde 2019), o horário do manual e os feriados nacionais de data fixa. A resposta inclui a próxima abertura, por exemplo "terça-feira, 03/11 às 09:00".
 
 **Por quê:** LLM erra aritmética e não sabe que dia é hoje.
@@ -241,7 +243,8 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 | 7 | Os pedidos vão de 2025 a 2026 | São tratados como dados reais da loja, com o status que está no CSV |
 | 8 | Os CSVs não têm peso nem dimensões dos produtos, que a cotação de frete exige | Embalagem estimada por categoria em `src/tools/shipping.py`. Exemplo: violão com 2,5 kg em caixa de 110×45×15 cm. O seguro usa o preço de venda, com promoção aplicada |
 | 9 | O manual fala em "região metropolitana de Campo Grande" sem listar as cidades | Só a cidade de Campo Grande recebe a regra de entrega local. As demais são cotadas pelo Melhor Envio |
-| 10 | "Fora do escopo" | Tudo que não é catálogo, pedido ou política da loja: futebol, aulas de música, "qual instrumento é melhor" etc. |
+| 10 | `orders.csv` tem só a entrega estimada, não a data real de recebimento | Para pedidos com status "delivered", os prazos de devolução contam a partir da entrega estimada |
+| 11 | "Fora do escopo" | Tudo que não é catálogo, pedido ou política da loja: futebol, aulas de música, "qual instrumento é melhor" etc. |
 
 ---
 
@@ -253,7 +256,7 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 - **O frete é uma estimativa.** Usa dimensões estimadas por categoria e o sandbox do Melhor Envio, cujos preços podem diferir da produção.
 - **Sem persistência:** o histórico se perde quando o servidor reinicia.
 - **Sem autenticação nem rate limit na API web.** Adequado para rodar localmente, não para expor publicamente.
-- **O loop do agente não tem testes automatizados.** Os testes cobrem ferramentas e regras; o comportamento do agente com o LLM foi validado com cenários executados manualmente.
+- **O loop do agente não tem testes automatizados.** Os testes cobrem ferramentas e regras. O comportamento com o LLM foi validado rodando cenários e lendo as respostas, como nos [exemplos](#exemplos-de-interação).
 
 ## O que faria com mais tempo
 
@@ -265,13 +268,34 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 
 ---
 
+## Exemplos de interação
+
+Cinco conversas geradas pelo agente, sem edição, em [`examples/`](examples/). As mensagens do cliente estão em `examples/inputs/`, e cada arquivo registra no topo o comando, a data e o modelo usados. Para gerar de novo:
+
+```bash
+python src/main.py examples/inputs/03_devolucao_pedido.txt examples/03_devolucao_pedido.md
+```
+
+| Conversa | O que mostra |
+|---|---|
+| [01 Catálogo de violões](examples/01_catalogo_violoes.md) | Violões até R$ 1.000 com preço no PIX, ficha técnica de um modelo e o violão mais caro do catálogo |
+| [02 Preço, PIX e promoção](examples/02_preco_promocao_pix.md) | "Quanto custa o Takamine GD20?", desconto no PIX e ukulele em promoção com preço original e percentual |
+| [03 Devolução de pedido](examples/03_devolucao_pedido.md) | **Não trivial:** pede a identificação antes de mostrar o pedido e aplica o prazo de 7 dias do manual a um pedido entregue há 352 dias. Informa que o prazo acabou e oferece a garantia do fabricante |
+| [04 Loja e fora do escopo](examples/04_loja_e_fora_do_escopo.md) | Endereço, "estão abertos agora?" (fechado por Finados, com o horário de reabertura), recusa de acessórios e de futebol |
+| [05 Sem estoque e frete](examples/05_sem_estoque_e_frete.md) | **Não trivial:** produto esgotado com alternativas e frete real até Brasília pelo Melhor Envio, depois de pedir o CEP |
+
+Os exemplos foram gerados em 02/11/2026, um feriado. Por isso a conversa 04 diz que a loja está fechada.
+
+---
+
 ## Testes
 
-`pytest` roda 24 testes, nenhum chama o LLM ou a internet:
+`pytest` roda 28 testes, nenhum chama o LLM ou a internet:
 
 | Arquivo | Testes | O que cobre |
 |---|---|---|
 | `tests/test_data_loader.py` | 11 | Carga, tipos, normalização, verificação de identidade, promoção, PIX |
+| `tests/test_orders.py` | 4 | Verificação por e-mail/telefone, pedido inexistente, prazos de devolução |
 | `tests/test_policies.py` | 4 | Manual extraído, horário em dia útil, sábado, domingo e Finados |
 | `tests/test_products.py` | 4 | Ordenação por preço, status da busca, busca por nome parcial |
 | `tests/test_shipping.py` | 5 | CEP inválido, regra de Campo Grande, frete especial, cotação (APIs simuladas) |
@@ -303,14 +327,14 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 
 ## Uso de assistentes de código
 
-Usei o **Claude** em dois papéis:
-- **Claude (chat):** entender o case e montar o briefing do projeto (`CLAUDE.md`), com contexto, requisitos, direção técnica sugerida e um checklist de entrega.
+Usei o Claude em dois papéis:
+- **Claude (chat):** entender o case e escrever um briefing do projeto, com contexto, requisitos, direção técnica sugerida e checklist de entrega.
 - **Claude Code (extensão do VS Code):** explorar os dados, propor o plano, implementar, testar e fazer os commits.
 
-**Como foi o workflow:**
-1. **Briefing primeiro.** O `CLAUDE.md` define que o assistente explora os dados e propõe um plano antes de escrever código, e que eu aprovo cada decisão. Eu escolhi a arquitetura (function calling), o provedor (OpenRouter, para não pagar outra API) e as regras de negócio. Um exemplo: "se não está no banco, a loja não vende".
-2. **Commits pequenos.** Cada passo lógico vira um commit, como o processo pede.
-3. **Testar de verdade mudou o resultado.** A primeira versão foi escrita sem ser executada. Quando rodei na minha máquina, nada funcionava: o modelo estava fixo no código, as ferramentas estavam no formato errado para a API e os testes de telefone esperavam o número de dígitos errado. A partir daí, passei a exigir que cada mudança fosse testada de ponta a ponta com o LLM antes do commit. Foi nesses testes que apareceram o "sem estoque" para atabaque, o preço inventado e a negação de produtos que a loja vende. As soluções estão nas decisões 3 e 4.
-4. **Revisão crítica.** Pedi ao assistente que apontasse o que estava errado no próprio trabalho. Isso levou a reescrever este README, que antes afirmava coisas não verificadas, e a refazer os exemplos de conversa, que tinham sido escritos à mão.
+Como foi o trabalho:
+1. **Briefing primeiro.** O assistente explorava os dados e propunha um plano antes de escrever código, e eu aprovava cada decisão. Escolhi a arquitetura (function calling), o provedor (OpenRouter, para não pagar outra API) e as regras de negócio, como "se não está no banco, a loja não vende".
+2. **Commits pequenos**, um por passo lógico, como o processo pede.
+3. **Testar de verdade mudou o resultado.** A primeira versão foi escrita sem ser executada. Quando rodei na minha máquina, nada funcionava: o modelo estava fixo no código, as ferramentas estavam no formato errado para a API e os testes de telefone esperavam o número de dígitos errado. A partir daí, cada mudança passou a ser testada com o LLM antes do commit. Foi nesses testes que apareceram o "sem estoque" para atabaque, o preço inventado e a negação de produtos que a loja vende (decisões 3 e 4).
+4. **Revisão crítica.** Pedi ao assistente que apontasse o que estava errado no próprio trabalho. Isso levou a reescrever este README, que antes afirmava coisas não verificadas, e a trocar os exemplos escritos à mão por conversas geradas pelo agente. Gerar os exemplos ainda revelou o erro do prazo de devolução (decisão 5).
 
-O registro etapa por etapa (o que pedi, o que o assistente fez, o que revisei) está em [docs/ai_workflow.md](docs/ai_workflow.md).
+O registro etapa por etapa (o que pedi, o que o assistente fez, o que eu decidi) está em [docs/ai_workflow.md](docs/ai_workflow.md).

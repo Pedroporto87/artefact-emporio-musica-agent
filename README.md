@@ -142,7 +142,8 @@ Se uma das regras falhar, o modelo recebe o problema e reescreve a resposta, uma
 - **Promoção vigente:** o preço final é calculado a partir do `discount_percent` da promoção com `is_active = 1`.
 - **Mais caro e mais barato:** `search_products` recebe `order` (`maior_preco` ou `menor_preco`) e informa `total_encontrado`. Antes, a lista vinha sempre do mais barato para o mais caro e cortada em 10 itens. Ao ouvir "qual o violão mais caro?", a Marina escolhia dentro dos 10 mais baratos e respondia R$ 429,90, quando o mais caro custa R$ 12.000,00.
 - **Prazos de devolução e garantia:** para pedidos entregues, `check_order_status` devolve os dias desde a entrega e se cada prazo do manual ainda vale (arrependimento em 7 dias, troca por defeito em 30, garantia legal em 90). Esse caso apareceu ao gerar os exemplos: a Marina disse que um pedido entregue há 352 dias ainda estava "dentro do prazo de 7 dias".
-- **Loja aberta agora:** `get_store_status` usa o horário de Campo Grande (UTC-4, sem horário de verão desde 2019), o horário do manual e os feriados nacionais de data fixa. A resposta inclui a próxima abertura, por exemplo "terça-feira, 03/11 às 09:00".
+- **Loja aberta agora:** `get_store_status` usa o horário de Campo Grande (UTC-4, sem horário de verão desde 2019), o horário do manual e os feriados. A resposta inclui a próxima abertura, por exemplo "terça-feira, 03/11 às 09:00".
+- **Feriados sem data fixa:** Carnaval, Sexta-feira Santa e Corpus Christi são deslocamentos a partir do domingo de Páscoa (-48 e -47, -2 e +60 dias). A Páscoa vem do algoritmo de Meeus/Jones/Butcher, conferido contra a biblioteca `dateutil` para todos os anos de 1900 a 2199. Isso funciona para qualquer ano, sem lista para manter nem API.
 
 **Por quê:** LLM erra aritmética e não sabe que dia é hoje.
 
@@ -239,7 +240,7 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 | 3 | O manual diz que a loja vende sopros e cordas orquestrais, mas os CSVs não têm nenhum produto dessas categorias | A loja trabalha com essas categorias, mas não há modelos no catálogo agora. O agente diz isso e oferece contato com a equipe |
 | 4 | `promotions.csv` não tem datas de início e fim | `is_active = 1` significa vigente hoje |
 | 5 | `customers.csv` não tem CPF | Verificação por e-mail ou telefone |
-| 6 | O manual fala em feriados, sem listar quais | Feriados nacionais de data fixa. Os móveis (Carnaval, Sexta-feira Santa, Corpus Christi) não estão incluídos |
+| 6 | O manual fala em feriados, sem listar quais | Feriados nacionais fixos, mais Carnaval (segunda e terça), Sexta-feira Santa e Corpus Christi. Carnaval e Corpus Christi são ponto facultativo no calendário nacional, mas a loja é tratada como fechada. Feriados estaduais e municipais não estão incluídos |
 | 7 | Os pedidos vão de 2025 a 2026 | São tratados como dados reais da loja, com o status que está no CSV |
 | 8 | Os CSVs não têm peso nem dimensões dos produtos, que a cotação de frete exige | Embalagem estimada por categoria em `src/tools/shipping.py`. Exemplo: violão com 2,5 kg em caixa de 110×45×15 cm. O seguro usa o preço de venda, com promoção aplicada |
 | 9 | O manual fala em "região metropolitana de Campo Grande" sem listar as cidades | Só a cidade de Campo Grande recebe a regra de entrega local. As demais são cotadas pelo Melhor Envio |
@@ -290,13 +291,13 @@ Os exemplos foram gerados em 02/11/2026, um feriado. Por isso a conversa 04 diz 
 
 ## Testes
 
-`pytest` roda 28 testes, nenhum chama o LLM ou a internet:
+`pytest` roda 31 testes, nenhum chama o LLM ou a internet:
 
 | Arquivo | Testes | O que cobre |
 |---|---|---|
 | `tests/test_data_loader.py` | 11 | Carga, tipos, normalização, verificação de identidade, promoção, PIX |
 | `tests/test_orders.py` | 4 | Verificação por e-mail/telefone, pedido inexistente, prazos de devolução |
-| `tests/test_policies.py` | 4 | Manual extraído, horário em dia útil, sábado, domingo e Finados |
+| `tests/test_policies.py` | 7 | Manual extraído, horário em dia útil, sábado, domingo, Finados, Páscoa e feriados móveis |
 | `tests/test_products.py` | 4 | Ordenação por preço, status da busca, busca por nome parcial |
 | `tests/test_shipping.py` | 5 | CEP inválido, regra de Campo Grande, frete especial, cotação (APIs simuladas) |
 
@@ -319,8 +320,7 @@ Os exemplos foram gerados em 02/11/2026, um feriado. Por isso a conversa 04 diz 
 │       ├── shipping.py       # estimativa de frete (manual + ViaCEP + Melhor Envio)
 │       └── policies.py       # leitura do manual e horário de funcionamento
 ├── tests/
-├── examples/
-└── docs/ai_workflow.md       # registro do uso de IA etapa por etapa
+└── examples/                 # conversas geradas pelo agente e as mensagens usadas (inputs/)
 ```
 
 ---
@@ -328,13 +328,40 @@ Os exemplos foram gerados em 02/11/2026, um feriado. Por isso a conversa 04 diz 
 ## Uso de assistentes de código
 
 Usei o Claude em dois papéis:
-- **Claude (chat):** entender o case e escrever um briefing do projeto, com contexto, requisitos, direção técnica sugerida e checklist de entrega.
+- **Claude (chat):** entender o case e escrever um briefing do projeto, com contexto, requisitos, direção técnica sugerida e checklist de entrega. O briefing também definia a forma de trabalhar: o assistente explora os dados e propõe um plano antes de escrever código, e eu aprovo as decisões.
 - **Claude Code (extensão do VS Code):** explorar os dados, propor o plano, implementar, testar e fazer os commits.
 
-Como foi o trabalho:
-1. **Briefing primeiro.** O assistente explorava os dados e propunha um plano antes de escrever código, e eu aprovava cada decisão. Escolhi a arquitetura (function calling), o provedor (OpenRouter, para não pagar outra API) e as regras de negócio, como "se não está no banco, a loja não vende".
-2. **Commits pequenos**, um por passo lógico, como o processo pede.
-3. **Testar de verdade mudou o resultado.** A primeira versão foi escrita sem ser executada. Quando rodei na minha máquina, nada funcionava: o modelo estava fixo no código, as ferramentas estavam no formato errado para a API e os testes de telefone esperavam o número de dígitos errado. A partir daí, cada mudança passou a ser testada com o LLM antes do commit. Foi nesses testes que apareceram o "sem estoque" para atabaque, o preço inventado e a negação de produtos que a loja vende (decisões 3 e 4).
-4. **Revisão crítica.** Pedi ao assistente que apontasse o que estava errado no próprio trabalho. Isso levou a reescrever este README, que antes afirmava coisas não verificadas, e a trocar os exemplos escritos à mão por conversas geradas pelo agente. Gerar os exemplos ainda revelou o erro do prazo de devolução (decisão 5).
+O histórico do git mostra a mesma sequência descrita abaixo (`git log --reverse`).
 
-O registro etapa por etapa (o que pedi, o que o assistente fez, o que eu decidi) está em [docs/ai_workflow.md](docs/ai_workflow.md).
+### Etapas
+
+**1. Exploração e plano (01/11).** O assistente levantou o schema dos 6 CSVs e propôs arquitetura, ferramentas, suposições e riscos. Eu aprovei function calling, pedi verificação de identidade por e-mail ou telefone (os CSVs não têm CPF) e criei o repositório.
+
+**2. Primeira versão, sem execução (01/11).** Loader, ferramentas, agente, CLI, exemplos e README foram escritos em sete commits, num intervalo de 11 minutos. Nada foi executado: o Python da minha máquina estava corrompido. Naquele momento, o README marcava o checklist como cumprido, e os exemplos de conversa tinham sido escritos à mão.
+
+**3. Fazer rodar de verdade (01/11).** Reinstalei o Python e, para não pagar outra API, indiquei a chave do OpenRouter que eu já tinha. O agente respondia "ocorreu um erro" a qualquer pergunta. Depois de várias rodadas de debug em que eu testava e devolvia o erro, cobrei que o assistente revisasse o próprio código. Ele encontrou o modelo fixo no código, as ferramentas no formato da API da Anthropic e os resultados sem `tool_call_id` (decisão 6). Os testes também nunca tinham rodado: os de telefone esperavam 10 dígitos para um número de 11. **A partir daí, toda mudança passou a ser testada com o LLM antes do commit.**
+
+**4. Comportamento do agente (01/11 e 02/11).** Cada problema abaixo apareceu ao usar o agente ou nos testes, e foi corrigido no código, não só no prompt:
+
+| O que apareceu | Causa | Onde está a correção |
+|---|---|---|
+| "Atabaques sem estoque no momento", para algo que a loja nunca vendeu | Lista vazia para dois casos diferentes | Decisão 3. A regra veio de mim: se não está no banco, a loja não vende |
+| Preço inventado e "não trabalhamos com baterias" | O modelo respondia sem consultar a ferramenta | Decisão 4 |
+| "Qual o endereço?" sem resposta | A busca no PDF devolvia 5 linhas soltas | Decisão 2. Eu aprovei não editar o PDF e documentar as divergências dele |
+| "Qual seu violão mais caro?" respondido com o mais barato | Lista ordenada do mais barato e cortada em 10 itens | Decisão 5 |
+| Card de um produto que a Marina não citou | O "3" de "Kit 3" casava com o preço "R$ 4.439,00" | Comparação por palavra inteira em `src/web.py` |
+| Pedido entregue há 352 dias "dentro do prazo de devolução" | O modelo não sabe a data de hoje nem conta dias | Decisão 5. Só apareceu ao gerar os exemplos reais |
+
+**5. Funcionalidades que eu pedi (02/11).** A home page com catálogo e chat (decisão 9), testada pela API e por capturas de tela. O orçamento de frete (decisão 11): o assistente pesquisou as opções e recomendou o Melhor Envio. Ele não aceitou deixar o LLM estimar o valor, porque o manual proíbe passar preço sem consultar o sistema. Eu criei a conta no sandbox. Os feriados móveis entraram depois que perguntei como a parte de feriados funcionava.
+
+**6. Revisão final (02/11).**
+- O README foi reescrito do zero, porque o anterior tinha afirmações falsas.
+- Os exemplos escritos à mão foram trocados por conversas geradas pelo agente.
+- O projeto foi clonado e executado do zero seguindo só este README. Isso revelou que arquivos de entrada salvos no Bloco de Notas quebravam a CLI.
+- Removi emojis dos prints, código morto e comentários que repetiam o código. Os commits deixaram de ter a linha de coautoria do assistente.
+
+### O que aprendi sobre usar o assistente
+
+- **Sem execução, o código só parece pronto.** A primeira versão estava organizada e não funcionava. O ganho real começou quando passei a exigir teste de ponta a ponta antes de cada commit.
+- **Vale pedir que o assistente critique o próprio trabalho.** Foi assim que apareceram os exemplos escritos à mão e o README com afirmações não verificadas.
+- **As decisões de negócio ficaram comigo:** o que conta como "não vendemos", não editar o PDF da loja, qual provedor usar e quando parar de adicionar funcionalidades.

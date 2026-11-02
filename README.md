@@ -6,6 +6,7 @@ A **Marina**, assistente virtual da loja, responde sobre:
 
 - **Catálogo**: produtos, preços, estoque, promoções vigentes e preço no PIX.
 - **Pedidos**: status e rastreio, só depois de verificar a identidade do cliente.
+- **Frete**: estimativa até o CEP do cliente, com a regra do manual em Campo Grande e cotação no Melhor Envio para outras cidades.
 - **Políticas**: horário, pagamento, frete, trocas, garantia e privacidade, com base no manual da loja.
 - **Fora do escopo**: recusa com simpatia e redireciona para o que a loja faz.
 
@@ -34,9 +35,12 @@ Copie `.env.example` para `.env` e preencha a chave:
 LLM_API_KEY=sk-or-v1-...
 LLM_MODEL=openai/gpt-4o-mini
 LLM_BASE_URL=https://openrouter.ai/api/v1
+MELHOR_ENVIO_TOKEN=          # opcional, ver abaixo
 ```
 
 O `.env` está no `.gitignore` e nunca é versionado.
+
+**Cotação de frete (opcional):** crie uma conta gratuita em https://sandbox.melhorenvio.com.br. Em **Integrações → Permissões de acesso**, gere um token com a permissão `shipping-calculate`. A consulta no sandbox não tem custo. Sem o token, o agente funciona normalmente e, para fora de Campo Grande, informa só as modalidades e os prazos do manual.
 
 **Home page (catálogo + chat):**
 
@@ -60,6 +64,7 @@ Digite `sair` para encerrar.
 python tests/test_data_loader.py
 python tests/test_policies.py
 python tests/test_products.py
+python tests/test_shipping.py
 ```
 
 ---
@@ -90,7 +95,7 @@ O LLM decide **o que** consultar e **como** falar. Tudo o que é dado (preço, e
 
 ### 1. Function calling em vez de RAG puro ou agente SQL
 
-**Decisão:** o LLM tem 8 ferramentas tipadas (busca de produtos, detalhes, promoções, alternativas, busca por nome, status do pedido, pedidos do cliente e status da loja) e escolhe quais chamar.
+**Decisão:** o LLM tem 9 ferramentas tipadas (busca de produtos, detalhes, promoções, alternativas, busca por nome, status do pedido, pedidos do cliente, estimativa de frete e status da loja) e escolhe quais chamar.
 
 **Por quê:** as perguntas mais frequentes envolvem números que não podem estar errados. Com ferramentas, o preço vem da tabela, não da memória do modelo, e cada ferramenta pode ser testada sem LLM.
 
@@ -194,7 +199,25 @@ O `DataLoader` carrega os 6 CSVs com `pandas` em memória (65 produtos, 50 clien
 
 **Por quê:** o multi-turno é necessário (o agente pede o e-mail numa mensagem e consulta o pedido na seguinte), mas persistir conversas entre reinícios não traz ganho para um protótipo e criaria uma obrigação de LGPD.
 
-### 11. Estratégia de prompt
+### 11. Estimativa de frete: regra do manual + Melhor Envio
+
+**Decisão:** a ferramenta `estimate_shipping(cep, product_id)` segue um caminho por tipo de destino:
+1. O **ViaCEP** (gratuito, sem chave) valida o CEP e identifica a cidade.
+2. **Campo Grande:** aplica a regra do manual (5.1) sem API: grátis acima de R$ 500, senão R$ 35, entrega por motoboy em 1 a 3 dias úteis.
+3. **Baterias e teclados/pianos:** a Marina encaminha para cotação individual, como o manual exige para instrumentos de grande porte (5.2).
+4. **Outras cidades:** cotação no **Melhor Envio**, com origem na loja (CEP 79202-333). A resposta mostra só os serviços disponíveis, ordenados por preço, e sempre como estimativa.
+5. **Sem token ou com falha na API:** a Marina informa as modalidades e os prazos do manual, sem valor.
+
+**Por quê:**
+- O Melhor Envio cota numa única chamada as transportadoras que o manual cita (Correios e Jadlog).
+- Tem sandbox gratuito, e a API oficial dos Correios exige contrato.
+- O valor vem da API, não do LLM. Isso respeita a regra do manual de nunca passar preço ou prazo sem consultar o sistema (7.1).
+
+**Alternativa descartada:** deixar o LLM estimar o frete. O valor mudaria a cada conversa e não teria base nenhuma.
+
+**Observação dos testes:** para um violão (caixa de 110 cm), PAC e SEDEX são recusados por excederem o limite de dimensões dos Correios, e só a Jadlog cota. A ferramenta trata esse caso e mostra apenas o que está disponível.
+
+### 12. Estratégia de prompt
 
 O system prompt (`src/prompts.py`) tem, nesta ordem:
 1. **Persona**, com o tom de voz do manual (seção 7.1): informal mas profissional.
@@ -219,7 +242,9 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 | 5 | `customers.csv` não tem CPF | Verificação por e-mail ou telefone |
 | 6 | O manual fala em feriados, sem listar quais | Feriados nacionais de data fixa. Os móveis (Carnaval, Sexta-feira Santa, Corpus Christi) não estão incluídos |
 | 7 | Os pedidos vão de 2025 a 2026 | São tratados como dados reais da loja, com o status que está no CSV |
-| 8 | "Fora do escopo" | Tudo que não é catálogo, pedido ou política da loja: futebol, aulas de música, "qual instrumento é melhor" etc. |
+| 8 | Os CSVs não têm peso nem dimensões dos produtos, que a cotação de frete exige | Embalagem estimada por categoria em `src/tools/shipping.py`. Exemplo: violão com 2,5 kg em caixa de 110×45×15 cm. O seguro usa o preço de venda, com promoção aplicada |
+| 9 | O manual fala em "região metropolitana de Campo Grande" sem listar as cidades | Só a cidade de Campo Grande recebe a regra de entrega local. As demais são cotadas pelo Melhor Envio |
+| 10 | "Fora do escopo" | Tudo que não é catálogo, pedido ou política da loja: futebol, aulas de música, "qual instrumento é melhor" etc. |
 
 ---
 
@@ -228,7 +253,7 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 - **Erros de raciocínio do modelo não são detectados.** A checagem confere números e negações, não a lógica da resposta. O caso mais visível ("qual o violão mais caro?" respondido com o mais barato) foi resolvido no código: ver a decisão 5.
 - **Respostas variam entre execuções.** O mesmo pedido pode gerar listas diferentes ou chamadas de ferramentas desnecessárias (por exemplo, consultar o horário numa pergunta sobre frete).
 - **A checagem corrige uma vez só.** Se o modelo errar de novo na reescrita, a resposta sai assim.
-- **Frete para outras cidades não é calculado.** O manual diz que depende de CEP, peso e dimensões, dados que não temos. O agente explica as modalidades e encaminha para a equipe.
+- **O frete é uma estimativa.** Usa dimensões estimadas por categoria e o sandbox do Melhor Envio, cujos preços podem diferir da produção.
 - **Sem persistência:** o histórico se perde quando o servidor reinicia.
 - **Sem autenticação nem rate limit na API web.** Adequado para rodar localmente, não para expor publicamente.
 - **O loop do agente não tem testes automatizados.** Os testes cobrem ferramentas e regras; o comportamento do agente com o LLM foi validado com cenários executados manualmente.
@@ -239,7 +264,7 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 2. **SQLite** como fonte dos dados, quando houver escrita (novos pedidos, reclamações registradas) e histórico persistente com política de retenção.
 3. **Encaminhamento real para humano:** hoje a Marina informa o prazo de 24h úteis, mas não cria um registro.
 4. **Integração com WhatsApp**, o canal citado no manual.
-5. **Ferramenta de cálculo de frete** a partir do CEP.
+5. **Frete em produção:** peso e dimensões reais de cada produto e o token de produção do Melhor Envio.
 
 ---
 
@@ -249,6 +274,7 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 python tests/test_data_loader.py   # 11 testes: carga, tipos, normalização, verificação, promoção, PIX
 python tests/test_policies.py      # 4 testes: manual extraído, horário, sábado, domingo e Finados
 python tests/test_products.py      # 4 testes: ordenação por preço, status da busca, busca por nome parcial
+python tests/test_shipping.py      # 5 testes: CEP inválido, regra de Campo Grande, frete especial, cotação (APIs simuladas)
 ```
 
 ---
@@ -267,6 +293,7 @@ python tests/test_products.py      # 4 testes: ordenação por preço, status da
 │   └── tools/
 │       ├── products.py       # catálogo, promoções, alternativas, status de busca
 │       ├── orders.py         # pedidos com verificação de identidade
+│       ├── shipping.py       # estimativa de frete (manual + ViaCEP + Melhor Envio)
 │       └── policies.py       # leitura do manual e horário de funcionamento
 ├── tests/
 ├── examples/

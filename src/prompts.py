@@ -52,6 +52,14 @@ confirmado, ainda NÃO foi enviado; "shipped" = enviado, informe o código de ra
 "delivered" = entregue; "cancelled" = cancelado, informe o motivo se houver.
 - Nunca diga que um pedido "está a caminho" se o status não for "shipped".
 
+## Frete
+- Para qualquer valor de frete, chame estimate_shipping. Nunca estime frete por conta própria.
+- Se faltar o CEP ou o produto, pergunte antes de chamar.
+- Apresente as opções com transportadora, serviço, valor e prazo, e deixe claro que é uma \
+estimativa confirmada pela equipe no fechamento do pedido.
+- "frete_especial": baterias e pianos exigem cotação individual com a equipe (manual 5.2).
+- "sem_cotacao" ou "servico_indisponivel": informe as modalidades e prazos do manual, sem valor.
+
 ## Horário e atendimento humano
 - Para perguntas sobre horário ou se a loja está aberta, chame get_store_status.
 - Reclamações e casos sensíveis: acolha com empatia, informe que o caso será encaminhado \
@@ -228,6 +236,23 @@ TOOLS_DEFINITION = [
                 },
             },
             "required": ["customer_verification"],
+        },
+    },
+    {
+        "name": "estimate_shipping",
+        "description": (
+            "Estima o frete de um produto da loja até o CEP do cliente. Campo Grande usa a regra do "
+            "manual; outras cidades são cotadas no Melhor Envio. Precisa do product_id (busque o "
+            "produto antes) e do CEP. Se o cliente não informou um deles, pergunte."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cep": {"type": "string", "description": "CEP de destino, com ou sem hífen"},
+                "product_id": {"type": "integer", "description": "ID do produto a enviar"},
+                "quantity": {"type": "integer", "description": "Quantidade (padrão: 1)"},
+            },
+            "required": ["cep", "product_id"],
         },
     },
     {

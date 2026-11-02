@@ -14,6 +14,7 @@ from data_loader import DataLoader
 from tools.products import ProductTools
 from tools.orders import OrderTools
 from tools.policies import load_manual_text, store_status
+from tools.shipping import estimate_shipping
 from prompts import build_system_prompt, TOOLS_DEFINITION
 
 DEFAULT_MODEL = "openai/gpt-4o-mini"
@@ -213,6 +214,19 @@ class MusicaAgent:
                 )
             if tool_name == "get_store_status":
                 return store_status()
+            if tool_name == "estimate_shipping":
+                product = self.loader.get_product_with_promotion(tool_input.get("product_id"))
+                if not product:
+                    return {"error": "Produto não encontrado. Busque o produto antes de estimar o frete."}
+                promo = product["promotion"]
+                return estimate_shipping(
+                    cep=str(tool_input.get("cep", "")),
+                    product={
+                        "category_id": int(product["category_id"]),
+                        "sale_price": float(promo["discounted_price"] if promo else product["price_brl"]),
+                    },
+                    quantity=int(tool_input.get("quantity") or 1),
+                )
             return {"error": f"Ferramenta desconhecida: {tool_name}"}
         except Exception as e:
             return {"error": str(e)}

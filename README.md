@@ -61,10 +61,7 @@ Digite `sair` para encerrar.
 **Testes** (determinísticos, sem chamar o LLM):
 
 ```bash
-python tests/test_data_loader.py
-python tests/test_policies.py
-python tests/test_products.py
-python tests/test_shipping.py
+pytest
 ```
 
 ---
@@ -270,12 +267,14 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 
 ## Testes
 
-```bash
-python tests/test_data_loader.py   # 11 testes: carga, tipos, normalização, verificação, promoção, PIX
-python tests/test_policies.py      # 4 testes: manual extraído, horário, sábado, domingo e Finados
-python tests/test_products.py      # 4 testes: ordenação por preço, status da busca, busca por nome parcial
-python tests/test_shipping.py      # 5 testes: CEP inválido, regra de Campo Grande, frete especial, cotação (APIs simuladas)
-```
+`pytest` roda 24 testes, nenhum chama o LLM ou a internet:
+
+| Arquivo | Testes | O que cobre |
+|---|---|---|
+| `tests/test_data_loader.py` | 11 | Carga, tipos, normalização, verificação de identidade, promoção, PIX |
+| `tests/test_policies.py` | 4 | Manual extraído, horário em dia útil, sábado, domingo e Finados |
+| `tests/test_products.py` | 4 | Ordenação por preço, status da busca, busca por nome parcial |
+| `tests/test_shipping.py` | 5 | CEP inválido, regra de Campo Grande, frete especial, cotação (APIs simuladas) |
 
 ---
 

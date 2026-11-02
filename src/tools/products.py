@@ -1,18 +1,41 @@
-"""Ferramentas para busca e consulta de produtos."""
+"""Ferramentas de catálogo: busca, detalhes, promoções e alternativas."""
 
 import re
-from typing import List, Dict, Optional
-from fuzzywuzzy import fuzz
-import sys
-from pathlib import Path
+from typing import Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pandas as pd
+from fuzzywuzzy import fuzz
+
 from data_loader import DataLoader
+
+STOPWORDS = {"de", "do", "da", "e"}
 
 
 class ProductTools:
     def __init__(self, loader: DataLoader):
         self.loader = loader
+
+    def _summary(self, row: pd.Series, with_description: bool = False) -> Dict:
+        product_id = int(row["product_id"])
+        priced = self.loader.get_product_with_promotion(product_id)
+        item = {
+            "product_id": product_id,
+            "name": row["name"],
+            "price_brl": round(float(row["price_brl"]), 2),
+            "stock_quantity": int(row["stock_quantity"]),
+            "pix_price": priced["pix_price"],
+        }
+        if priced["promotion"]:
+            item["promotion"] = priced["promotion"]
+        if with_description:
+            item["description"] = row["description"]
+            item["category"] = self.loader.get_category_name(int(row["category_id"]))
+        return item
+
+    def categories_with_products(self) -> List[str]:
+        ids = set(self.loader.products["category_id"].unique())
+        cats = self.loader.categories
+        return cats[cats["category_id"].isin(ids)]["name"].tolist()
 
     def search_products(
         self,
@@ -24,58 +47,40 @@ class ProductTools:
         limit: int = 10,
         order: str = "menor_preco",
     ) -> Dict:
-        """
-        Busca produtos com filtros.
-
-        Returns:
-            Dict com "status" e "produtos". O status separa "a loja não vende isso"
-            (nao_vendemos) de "vendemos, mas acabou" (sem_estoque), para o agente
-            não confundir os dois casos.
-        """
-        if self.loader.products is None:
-            self.loader.load_all()
-
-        results = self.loader.products.copy()
+        """O "status" separa "a loja não vende isso" de "vende, mas acabou": com lista vazia o modelo confundia os dois."""
+        results = self.loader.products
 
         if category_name:
             cat_id = self._find_category_id(category_name)
-            if cat_id is not None:
-                results = results[results["category_id"] == cat_id]
-                if results.empty:
-                    return {
-                        "status": "categoria_sem_produtos",
-                        "mensagem": (
-                            f"A loja trabalha com '{self.loader.get_category_name(cat_id)}', mas não há "
-                            "modelos dessa categoria no catálogo agora. NÃO cite produtos nem preços."
-                        ),
-                        "categorias_que_vendemos": self.categories_with_products(),
-                        "produtos": [],
-                    }
             if cat_id is None:
                 return {
                     "status": "nao_vendemos",
                     "mensagem": (
-                        f"A loja não trabalha com '{category_name}'. Responda apenas que não "
-                        "trabalhamos com isso e ofereça as categorias abaixo. NÃO cite nenhum "
-                        "produto ou preço sem antes chamar search_products para a categoria escolhida."
+                        f"A loja não trabalha com '{category_name}'. Responda apenas que não trabalhamos com "
+                        "isso e ofereça as categorias abaixo. NÃO cite nenhum produto ou preço sem antes "
+                        "chamar search_products para a categoria escolhida."
+                    ),
+                    "categorias_que_vendemos": self.categories_with_products(),
+                    "produtos": [],
+                }
+            results = results[results["category_id"] == cat_id]
+            if results.empty:
+                return {
+                    "status": "categoria_sem_produtos",
+                    "mensagem": (
+                        f"A loja trabalha com '{self.loader.get_category_name(cat_id)}', mas não há modelos "
+                        "dessa categoria no catálogo agora. NÃO cite produtos nem preços."
                     ),
                     "categorias_que_vendemos": self.categories_with_products(),
                     "produtos": [],
                 }
 
-        # Filtro por marca (busca no nome normalizado)
         if brand:
-            brand_norm = self.loader._normalize_text(brand)
-            results = results[
-                results["name_normalized"].str.contains(brand_norm, regex=False)
-            ]
-
-        # Filtro por preço
+            results = results[results["name_normalized"].str.contains(self.loader._normalize_text(brand), regex=False)]
         if price_min is not None:
             results = results[results["price_brl"] >= price_min]
         if price_max is not None:
             results = results[results["price_brl"] <= price_max]
-
         if results.empty:
             return {
                 "status": "nenhum_resultado",
@@ -90,261 +95,117 @@ class ProductTools:
                     "status": "sem_estoque",
                     "mensagem": "Existem produtos com esses filtros, mas todos estão sem estoque.",
                     "produtos_sem_estoque": [
-                        {"product_id": int(r["product_id"]), "name": r["name"]}
-                        for _, r in results.head(limit).iterrows()
+                        {"product_id": int(r["product_id"]), "name": r["name"]} for _, r in results.head(limit).iterrows()
                     ],
                     "produtos": [],
                 }
             results = in_stock
 
-        # A ordem é decidida aqui: com a lista cortada em `limit`, o modelo não tem como achar o
-        # "mais caro" sozinho se receber só os mais baratos.
+        # A ordem é decidida aqui: com a lista cortada em `limit`, o modelo não acha o "mais caro"
+        # se receber só os mais baratos.
         results = results.sort_values("price_brl", ascending=(order != "maior_preco"))
-        total_found = len(results)
-        results = results.head(limit)
-
-        # Formatar resposta
-        output = []
-        for _, row in results.iterrows():
-            prod = {
-                "product_id": int(row["product_id"]),
-                "name": row["name"],
-                "price_brl": round(row["price_brl"], 2),
-                "stock_quantity": int(row["stock_quantity"]),
-                "description": row["description"],
-                "category": self.loader.get_category_name(row["category_id"]),
-            }
-
-            # Adicionar promoção se ativa
-            prod_with_promo = self.loader.get_product_with_promotion(int(row["product_id"]))
-            if prod_with_promo and prod_with_promo["promotion"]:
-                prod["promotion"] = prod_with_promo["promotion"]
-            prod["pix_price"] = prod_with_promo["pix_price"]
-
-            output.append(prod)
-
+        shown = [self._summary(row, with_description=True) for _, row in results.head(limit).iterrows()]
         return {
             "status": "ok",
             "ordenado_por": "maior preço primeiro" if order == "maior_preco" else "menor preço primeiro",
-            "total_encontrado": total_found,
-            "mostrando": len(output),
-            "produtos": output,
+            "total_encontrado": len(results),
+            "mostrando": len(shown),
+            "produtos": shown,
         }
 
-    def categories_with_products(self) -> List[str]:
-        """Nomes das categorias que têm ao menos um produto no catálogo."""
-        ids = set(self.loader.products["category_id"].unique())
-        cats = self.loader.categories
-        return cats[cats["category_id"].isin(ids)]["name"].tolist()
-
     def get_product_details(self, product_id: int) -> Optional[Dict]:
-        """
-        Retorna detalhes completos de um produto.
-
-        Args:
-            product_id: ID do produto
-
-        Returns:
-            Dicionário com: id, name, price, stock, category, specs, promotion (se ativo)
-        """
-        if self.loader.products is None:
-            self.loader.load_all()
-
-        prod = self.loader.get_product_with_promotion(product_id)
-        if not prod:
+        product = self.loader.get_product_with_promotion(product_id)
+        if not product:
             return None
-
-        # Formatar resposta
         return {
-            "product_id": int(prod["product_id"]),
-            "name": prod["name"],
-            "price_brl": round(prod["price_brl"], 2),
-            "stock_quantity": int(prod["stock_quantity"]),
-            "description": prod["description"],
-            "category": self.loader.get_category_name(prod["category_id"]),
-            "specs": prod.get("specs", {}),
-            "promotion": prod.get("promotion"),
-            "pix_price": prod.get("pix_price"),
-            "status": prod.get("status", "active"),
+            "product_id": int(product["product_id"]),
+            "name": product["name"],
+            "price_brl": round(float(product["price_brl"]), 2),
+            "stock_quantity": int(product["stock_quantity"]),
+            "description": product["description"],
+            "category": self.loader.get_category_name(int(product["category_id"])),
+            "specs": product["specs"],
+            "promotion": product["promotion"],
+            "pix_price": product["pix_price"],
         }
 
     def list_active_promotions(self) -> List[Dict]:
-        """
-        Retorna todas as promoções vigentes.
+        active = self.loader.promotions[self.loader.promotions["is_active"]]
+        products = self.loader.products.set_index("product_id")
+        promotions = []
+        for _, promo in active.iterrows():
+            if promo["product_id"] not in products.index:
+                continue
+            price = float(products.loc[promo["product_id"], "price_brl"])
+            promotions.append({
+                "product_id": int(promo["product_id"]),
+                "product_name": products.loc[promo["product_id"], "name"],
+                "promotion_name": promo["description"],
+                "discount_percent": float(promo["discount_percent"]),
+                "original_price": round(price, 2),
+                "final_price": round(price * (1 - promo["discount_percent"] / 100), 2),
+            })
+        return sorted(promotions, key=lambda p: p["discount_percent"], reverse=True)
 
-        Returns:
-            Lista de promoções ativas com: product_id, name, discount_percent
-        """
-        if self.loader.promotions is None or self.loader.products is None:
-            self.loader.load_all()
-
-        active = self.loader.promotions[self.loader.promotions["is_active"] == True]
-
-        output = []
-        for _, row in active.iterrows():
-            prod = self.loader.products[
-                self.loader.products["product_id"] == row["product_id"]
-            ]
-            if not prod.empty:
-                output.append({
-                    "product_id": int(row["product_id"]),
-                    "product_name": prod.iloc[0]["name"],
-                    "promotion_name": row["description"],
-                    "discount_percent": float(row["discount_percent"]),
-                    "original_price": round(prod.iloc[0]["price_brl"], 2),
-                    "final_price": round(
-                        prod.iloc[0]["price_brl"] * (1 - row["discount_percent"] / 100), 2
-                    ),
-                })
-
-        return sorted(output, key=lambda x: x["discount_percent"], reverse=True)
-
-    def suggest_alternatives(
-        self, product_id: int, max_price: Optional[float] = None
-    ) -> List[Dict]:
-        """
-        Sugere produtos similares (mesma categoria, estoque > 0).
-        Útil quando produto solicitado está sem estoque.
-
-        Args:
-            product_id: ID do produto indisponível
-            max_price: Limite de preço (padrão: ± 20% do preço original)
-
-        Returns:
-            Lista de alternativas similares
-        """
-        if self.loader.products is None:
-            self.loader.load_all()
-
-        original = self.loader.products[
-            self.loader.products["product_id"] == product_id
-        ]
+    def suggest_alternatives(self, product_id: int, max_price: Optional[float] = None) -> List[Dict]:
+        """Mesma categoria e em estoque; sem max_price, preço até 20% acima ou abaixo do original."""
+        products = self.loader.products
+        original = products[products["product_id"] == product_id]
         if original.empty:
             return []
-
-        orig = original.iloc[0]
-        category_id = orig["category_id"]
-        base_price = orig["price_brl"]
-
-        # Definir faixa de preço se não especificado
-        if max_price is None:
-            price_min = base_price * 0.8
-            price_max = base_price * 1.2
-        else:
-            price_min = 0
-            price_max = max_price
-
-        # Buscar similares (mesma categoria, em estoque, preço próximo)
-        alternatives = self.loader.products[
-            (self.loader.products["category_id"] == category_id)
-            & (self.loader.products["product_id"] != product_id)
-            & (self.loader.products["stock_quantity"] > 0)
-            & (self.loader.products["price_brl"] >= price_min)
-            & (self.loader.products["price_brl"] <= price_max)
-        ].sort_values("price_brl")
-
-        # Limitar a 5 alternativas
-        alternatives = alternatives.head(5)
-
-        output = []
-        for _, row in alternatives.iterrows():
-            prod = {
-                "product_id": int(row["product_id"]),
-                "name": row["name"],
-                "price_brl": round(row["price_brl"], 2),
-                "stock_quantity": int(row["stock_quantity"]),
-                "reason": f"Mesma categoria, {row['stock_quantity']} em estoque",
-            }
-
-            # Adicionar promoção se ativa
-            prod_with_promo = self.loader.get_product_with_promotion(int(row["product_id"]))
-            if prod_with_promo and prod_with_promo["promotion"]:
-                prod["promotion"] = prod_with_promo["promotion"]
-            prod["pix_price"] = prod_with_promo["pix_price"]
-
-            output.append(prod)
-
-        return output
+        base_price = original.iloc[0]["price_brl"]
+        low, high = (0, max_price) if max_price is not None else (base_price * 0.8, base_price * 1.2)
+        similar = products[
+            (products["category_id"] == original.iloc[0]["category_id"])
+            & (products["product_id"] != product_id)
+            & (products["stock_quantity"] > 0)
+            & products["price_brl"].between(low, high)
+        ].sort_values("price_brl").head(5)
+        return [self._summary(row) for _, row in similar.iterrows()]
 
     def search_by_name(self, product_name: str, threshold: int = 80) -> Dict:
-        """
-        Busca produtos por nome com fuzzy matching.
-
-        Args:
-            product_name: Nome (parcial ou completo)
-            threshold: Score de similaridade (0-100, padrão 80)
-
-        Returns:
-            Produtos encontrados, ordenados por similaridade
-        """
-        if self.loader.products is None:
-            self.loader.load_all()
-
-        name_norm = self.loader._normalize_text(product_name)
-        results = []
-
+        # token_set_ratio aceita nome parcial ("takamine gd20" casa com o nome completo);
+        # sem hífen, "gf3d" casa com "GF-3D".
+        query = self.loader._normalize_text(product_name).replace("-", "")
+        matches = []
         for _, row in self.loader.products.iterrows():
-            # token_set_ratio aceita nomes parciais: "takamine gd20" casa com o nome completo do catálogo
-            score = fuzz.token_set_ratio(name_norm.replace("-", ""), row["name_normalized"].replace("-", ""))
+            score = fuzz.token_set_ratio(query, row["name_normalized"].replace("-", ""))
             if score >= threshold:
-                prod = {
-                    "product_id": int(row["product_id"]),
-                    "name": row["name"],
-                    "price_brl": round(row["price_brl"], 2),
-                    "stock_quantity": int(row["stock_quantity"]),
-                    "similarity_score": score,
-                }
-
-                # Adicionar promoção se ativa
-                prod_with_promo = self.loader.get_product_with_promotion(int(row["product_id"]))
-                if prod_with_promo and prod_with_promo["promotion"]:
-                    prod["promotion"] = prod_with_promo["promotion"]
-                prod["pix_price"] = prod_with_promo["pix_price"]
-
-                results.append(prod)
-
-        if not results:
+                matches.append({**self._summary(row), "similarity_score": score})
+        if not matches:
             return {
                 "status": "nao_encontrado",
                 "mensagem": (
-                    f"Nenhum produto chamado '{product_name}' no catálogo. Não diga 'sem estoque'. "
-                    "Se for um tipo de instrumento, use search_products com a categoria para saber se "
-                    "a loja trabalha com ele. NÃO cite produto ou preço sem consultar uma ferramenta."
+                    f"Nenhum produto chamado '{product_name}' no catálogo. Não diga 'sem estoque'. Se for um "
+                    "tipo de instrumento, use search_products com a categoria para saber se a loja trabalha "
+                    "com ele. NÃO cite produto ou preço sem consultar uma ferramenta."
                 ),
                 "categorias_que_vendemos": self.categories_with_products(),
                 "produtos": [],
             }
-        results = sorted(results, key=lambda x: x["similarity_score"], reverse=True)
-        return {"status": "ok", "produtos": results}
+        return {"status": "ok", "produtos": sorted(matches, key=lambda m: m["similarity_score"], reverse=True)}
 
     def _find_category_id(self, category_name: str) -> Optional[int]:
-        """Encontra ID da categoria por nome (fuzzy)."""
-        if self.loader.categories is None:
-            self.loader.categories = self.loader._load_categories()
-
-        cat_norm = self._singularize(self.loader._normalize_text(category_name))
-
-        for _, row in self.loader.categories.iterrows():
-            cat_name_norm = self._singularize(self.loader._normalize_text(row["name"]))
+        query = self._singularize(self.loader._normalize_text(category_name))
+        categories = self.loader.categories
+        for _, row in categories.iterrows():
             # Limiar alto: com 80, "violinos" casava com "violoes".
-            if fuzz.token_set_ratio(cat_norm, cat_name_norm) >= 90:
+            if fuzz.token_set_ratio(query, self._singularize(self.loader._normalize_text(row["name"]))) >= 90:
                 return int(row["category_id"])
 
         # Instrumento citado só na descrição: "violino" está em "Cordas Orquestrais".
-        query_words = set(self._words(category_name)) - {"de", "do", "da", "e"}
-        for _, row in self.loader.categories.iterrows():
+        query_words = set(self._words(category_name)) - STOPWORDS
+        for _, row in categories.iterrows():
             if query_words and query_words <= set(self._words(row["description"])):
                 return int(row["category_id"])
-
         return None
 
     def _words(self, text: str) -> List[str]:
-        clean = re.sub(r"[^a-z ]", " ", self.loader._normalize_text(text))
-        return self._singularize(clean).split()
+        return self._singularize(re.sub(r"[^a-z ]", " ", self.loader._normalize_text(text))).split()
 
     @staticmethod
     def _singularize(text: str) -> str:
-        """Plural simples do português, palavra a palavra: violoes -> violao, guitarras -> guitarra."""
+        """Plural simples do português: violoes -> violao, guitarras -> guitarra."""
         words = []
         for w in text.split():
             if w.endswith(("oes", "aes")):

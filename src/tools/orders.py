@@ -1,163 +1,89 @@
-"""Ferramentas para consulta de pedidos (com verificação de identidade)."""
+"""Consulta de pedidos. Nenhum dado sai sem conferir e-mail ou telefone do cliente."""
 
-from typing import List, Dict, Optional
-import sys
-from pathlib import Path
+from typing import Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pandas as pd
+
 from data_loader import DataLoader
+
+STATUS_DESCRIPTIONS = {
+    "pending": "Pedido recebido, aguardando processamento.",
+    "confirmed": "Pedido confirmado, ainda não foi enviado.",
+    "shipped": "Pedido enviado, a caminho do cliente.",
+    "delivered": "Pedido entregue.",
+    "cancelled": "Pedido cancelado.",
+}
+
+
+def _date(value) -> Optional[str]:
+    return str(value.date()) if pd.notna(value) else None
+
+
+def _text(value) -> Optional[str]:
+    return value if pd.notna(value) else None
 
 
 class OrderTools:
     def __init__(self, loader: DataLoader):
         self.loader = loader
 
-    def check_order_status(
-        self,
-        order_id: int,
-        customer_verification: Optional[str] = None,
-    ) -> Optional[Dict]:
-        """
-        Consulta status de um pedido (com verificação de identidade).
+    def check_order_status(self, order_id: int, customer_verification: Optional[str] = None) -> Dict:
+        orders = self.loader.orders
+        match = orders[orders["order_id"] == order_id]
+        if match.empty:
+            return {"status": "pedido_nao_encontrado",
+                    "mensagem": f"Não existe pedido número {order_id}. Peça ao cliente para conferir o número."}
+        order = match.iloc[0]
 
-        Requer verificação por email OU phone (3 vias).
-
-        Args:
-            order_id: ID do pedido
-            customer_verification: Email ou telefone para verificação
-
-        Returns:
-            Dicionário com status, tracking, entrega estimada, etc.
-            Retorna None se pedido não encontrado ou verificação falhar.
-        """
-        if self.loader.orders is None or self.loader.customers is None:
-            self.loader.load_all()
-
-        # Encontrar pedido
-        order = self.loader.orders[self.loader.orders["order_id"] == order_id]
-        if order.empty:
-            return None
-
-        order_row = order.iloc[0]
-        customer_id = int(order_row["customer_id"])
-
-        # VERIFICAÇÃO OBRIGATÓRIA: email ou phone
         if not customer_verification:
-            return {
-                "error": "Verificação obrigatória",
-                "message": "Para acessar seu pedido, precisamos verificar sua identidade. "
-                           "Por favor, forneça seu email ou telefone.",
-                "status": "verification_required",
-            }
+            return {"status": "verificacao_necessaria",
+                    "mensagem": "Peça o e-mail ou telefone cadastrado antes de mostrar o pedido."}
+        if not self._verify(int(order["customer_id"]), customer_verification):
+            # Mesma resposta para "não confere" e "pedido de outra pessoa": não revela de quem é o pedido.
+            return {"status": "verificacao_falhou",
+                    "mensagem": "E-mail ou telefone não conferem com o pedido. Peça para o cliente conferir."}
 
-        # Tentar verificar por email ou phone
-        if not self._verify_customer(customer_id, customer_verification):
-            return {
-                "error": "Verificação falhou",
-                "message": "Email ou telefone não correspondem ao pedido. "
-                           "Tente novamente ou entre em contato conosco.",
-                "status": "verification_failed",
-            }
-
-        # Verificação OK, retornar dados do pedido
-        items = self.loader.order_items[
-            self.loader.order_items["order_id"] == order_id
-        ]
-
-        order_dict = {
-            "order_id": int(order_row["order_id"]),
-            "order_date": str(order_row["order_date"].date()) if pd.notna(order_row["order_date"]) else "N/A",
-            "status": order_row["status"],
-            "total_brl": round(order_row["total_brl"], 2),
-            "payment_method": order_row["payment_method"],
-            "items": len(items),
-            "tracking_code": order_row["tracking_code"] if pd.notna(order_row["tracking_code"]) else None,
-            "estimated_delivery": str(order_row["estimated_delivery"].date()) if pd.notna(order_row["estimated_delivery"]) else None,
-            "notes": order_row["notes"] if pd.notna(order_row["notes"]) else None,
+        items = self.loader.order_items[self.loader.order_items["order_id"] == order_id]
+        return {
+            "status": "ok",
+            "order_id": int(order["order_id"]),
+            "order_status": order["status"],
+            "status_description": STATUS_DESCRIPTIONS.get(order["status"], order["status"]),
+            "order_date": _date(order["order_date"]),
+            "total_brl": round(float(order["total_brl"]), 2),
+            "payment_method": order["payment_method"],
+            "items": int(items["quantity"].sum()),
+            "tracking_code": _text(order["tracking_code"]),
+            "estimated_delivery": _date(order["estimated_delivery"]),
+            "notes": _text(order["notes"]),
         }
-
-        # Adicionar descrição do status
-        order_dict["status_description"] = self._get_status_description(order_row["status"])
-
-        return order_dict
 
     def get_customer_orders(self, customer_verification: str) -> List[Dict]:
-        """
-        Retorna todos os pedidos de um cliente (após verificação por email/phone).
-
-        Args:
-            customer_verification: Email ou telefone do cliente
-
-        Returns:
-            Lista de pedidos do cliente (resumido)
-        """
-        if self.loader.orders is None or self.loader.customers is None:
-            self.loader.load_all()
-
-        # Encontrar cliente por email ou phone
-        customer_id = self._find_customer_by_verification(customer_verification)
+        customer_id = self._find_customer(customer_verification)
         if customer_id is None:
             return []
-
-        # Buscar pedidos deste cliente
         orders = self.loader.orders[self.loader.orders["customer_id"] == customer_id]
-
-        output = []
-        for _, row in orders.iterrows():
-            output.append({
+        summary = [
+            {
                 "order_id": int(row["order_id"]),
-                "order_date": str(row["order_date"].date()) if pd.notna(row["order_date"]) else "N/A",
-                "status": row["status"],
-                "total_brl": round(row["total_brl"], 2),
-                "status_description": self._get_status_description(row["status"]),
-            })
+                "order_date": _date(row["order_date"]),
+                "order_status": row["status"],
+                "status_description": STATUS_DESCRIPTIONS.get(row["status"], row["status"]),
+                "total_brl": round(float(row["total_brl"]), 2),
+            }
+            for _, row in orders.iterrows()
+        ]
+        return sorted(summary, key=lambda o: o["order_date"] or "", reverse=True)
 
-        # Ordenar por data (mais recente primeiro)
-        output = sorted(output, key=lambda x: x["order_date"], reverse=True)
-        return output
-
-    def _verify_customer(self, customer_id: int, verification: str) -> bool:
-        """Verifica identidade do cliente por email ou phone."""
-        # Tentar como email
+    def _verify(self, customer_id: int, verification: str) -> bool:
         if "@" in verification:
             return self.loader.verify_customer(customer_id, email=verification)
-        else:
-            # Tentar como phone
-            return self.loader.verify_customer(customer_id, phone=verification)
+        return self.loader.verify_customer(customer_id, phone=verification)
 
-    def _find_customer_by_verification(self, verification: str) -> Optional[int]:
-        """Encontra customer_id a partir de email ou phone."""
-        if self.loader.customers is None:
-            self.loader.customers = self.loader._load_customers()
-
+    def _find_customer(self, verification: str) -> Optional[int]:
+        customers = self.loader.customers
         if "@" in verification:
-            # Buscar por email
-            customer = self.loader.customers[
-                self.loader.customers["email"].str.lower() == verification.lower()
-            ]
+            match = customers[customers["email"].str.lower() == verification.strip().lower()]
         else:
-            # Buscar por phone (normalizado)
-            phone_norm = self.loader._normalize_phone(verification)
-            customer = self.loader.customers[
-                self.loader.customers["phone_normalized"] == phone_norm
-            ]
-
-        if not customer.empty:
-            return int(customer.iloc[0]["customer_id"])
-        return None
-
-    @staticmethod
-    def _get_status_description(status: str) -> str:
-        """Retorna descrição amigável do status do pedido."""
-        descriptions = {
-            "pending": "Seu pedido foi recebido e está aguardando processamento. 📋",
-            "confirmed": "Seu pedido foi confirmado e em breve será enviado. ✅",
-            "shipped": "Seu pedido está a caminho! 📦",
-            "delivered": "Seu pedido foi entregue com sucesso! 🎉",
-            "cancelled": "Seu pedido foi cancelado. ❌",
-        }
-        return descriptions.get(status, f"Status: {status}")
-
-
-# Importar pandas para verificações de NaN
-import pandas as pd
+            match = customers[customers["phone_normalized"] == self.loader._normalize_phone(verification)]
+        return None if match.empty else int(match.iloc[0]["customer_id"])

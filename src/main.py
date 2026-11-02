@@ -1,143 +1,66 @@
-"""CLI interativa do agente Marina."""
+"""Atendimento pela linha de comando.
+
+    python src/main.py                         conversa interativa
+    python src/main.py entrada.txt saida.md    roda as mensagens do arquivo (uma por linha) e salva a conversa
+"""
 
 import os
 import sys
 from pathlib import Path
+
 from dotenv import load_dotenv
 
-# Adicionar src ao path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from agent import MusicaAgent
 
-
-def print_header():
-    """Imprime header amigável."""
-    print("\n" + "="*60)
-    print("🎵 EMPÓRIO DA MÚSICA - Atendimento por Chat")
-    print("="*60)
-    print("Olá! Eu sou Marina, sua assistente. 😊")
-    print("\nComo posso ajudar você hoje?")
-    print("(Digite 'sair' para encerrar a conversa)")
-    print("="*60 + "\n")
+ROOT = Path(__file__).resolve().parent.parent
+EXIT_WORDS = {"sair", "exit", "quit"}
 
 
-def print_separator():
-    """Imprime separador."""
-    print("-" * 60)
-
-
-def main():
-    """Função principal - loop de conversa."""
-    # Carregar variáveis de ambiente
-    load_dotenv()
+def build_agent() -> MusicaAgent:
+    load_dotenv(ROOT / ".env")
     api_key = os.getenv("LLM_API_KEY")
-
     if not api_key:
-        print("❌ Erro: LLM_API_KEY não definida!")
-        print("   Por favor, configure a variável de ambiente LLM_API_KEY")
-        print("   ou crie um arquivo .env com: LLM_API_KEY=sua_chave_openrouter")
-        print("   Obtenha uma chave gratuita em: https://openrouter.ai")
-        sys.exit(1)
+        sys.exit("LLM_API_KEY não definida. Copie .env.example para .env e preencha a chave do OpenRouter.")
+    return MusicaAgent(api_key=api_key)
 
-    # Inicializar agente
-    print("🚀 Carregando dados da loja...")
-    try:
-        agent = MusicaAgent(api_key=api_key)
-        print("✅ Agente pronto!")
-    except Exception as e:
-        print(f"❌ Erro ao inicializar agente: {e}")
-        sys.exit(1)
 
-    # Loop de conversa
-    print_header()
-
+def interactive():
+    agent = build_agent()
+    print("Empório da Música - atendimento com a Marina")
+    print("Digite 'sair' para encerrar.\n")
     while True:
-        # Receber entrada do usuário
         try:
-            user_input = input("Você: ").strip()
+            message = input("Você: ").strip()
         except (KeyboardInterrupt, EOFError):
-            # Ctrl+C ou EOF
-            print("\n\nAté logo! 👋")
+            print()
             break
-
-        # Verificar se usuário quer sair
-        if user_input.lower() in ["sair", "exit", "quit", "bye"]:
-            print("\nAgente: Obrigada por usar o atendimento do Empório da Música! 🎵")
-            print("         Volte sempre! 😊\n")
+        if message.lower() in EXIT_WORDS:
             break
-
-        if not user_input:
+        if not message:
             continue
-
-        # Processar mensagem
-        print_separator()
-        print("Agente: ", end="", flush=True)
         try:
-            response = agent.process_message(user_input)
-            print(response)
-        except Exception as e:
-            print(f"❌ Erro ao processar mensagem: {e}")
-            # Continue mesmo com erro
-
-        print_separator()
-        print()
+            print(f"\nMarina: {agent.process_message(message)}\n")
+        except Exception as exc:
+            print(f"\n[erro ao falar com o modelo: {exc}]\n")
 
 
-def run_with_file(input_file: str, output_file: str = None):
-    """
-    Executa conversa a partir de arquivo de entrada.
-
-    Útil para gerar exemplos de conversas.
-
-    Args:
-        input_file: Arquivo com mensagens (uma por linha)
-        output_file: Arquivo para salvar conversas (opcional)
-    """
-    load_dotenv()
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-
-    if not api_key:
-        print("❌ ANTHROPIC_API_KEY não definida!")
-        sys.exit(1)
-
-    agent = MusicaAgent(api_key=api_key)
-
-    with open(input_file, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    conversation = []
-
-    for line in lines:
-        user_msg = line.strip()
-        if not user_msg:
-            continue
-
-        print(f"Você: {user_msg}")
-        response = agent.process_message(user_msg)
-        print(f"Agente: {response}\n")
-
-        conversation.append({
-            "user": user_msg,
-            "agent": response,
-        })
-
-    # Salvar em arquivo se especificado
+def from_file(input_file: str, output_file: str = None):
+    agent = build_agent()
+    messages = [line.strip() for line in Path(input_file).read_text(encoding="utf-8").splitlines() if line.strip()]
+    transcript = []
+    for message in messages:
+        reply = agent.process_message(message)
+        print(f"Você: {message}\nMarina: {reply}\n")
+        transcript.append(f"**Cliente:** {message}\n\n**Marina:** {reply}\n")
     if output_file:
-        with open(output_file, "w", encoding="utf-8") as f:
-            for turn in conversation:
-                f.write(f"**Você:** {turn['user']}\n\n")
-                f.write(f"**Agente:** {turn['agent']}\n\n")
-                f.write("---\n\n")
-        print(f"✅ Conversa salva em: {output_file}")
+        Path(output_file).write_text("\n---\n\n".join(transcript), encoding="utf-8")
+        print(f"Conversa salva em {output_file}")
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        # Executar com arquivo de entrada
-        input_file = sys.argv[1]
-        output_file = sys.argv[2] if len(sys.argv) > 2 else None
-        run_with_file(input_file, output_file)
+        from_file(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
     else:
-        # Modo interativo
-        main()
+        interactive()

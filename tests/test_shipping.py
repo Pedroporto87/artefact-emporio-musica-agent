@@ -1,4 +1,4 @@
-"""Testes da estimativa de frete — ViaCEP e Melhor Envio simulados, sem rede."""
+"""Testes da estimativa de frete (ViaCEP e Melhor Envio simulados, sem rede)."""
 
 import os
 import sys
@@ -22,7 +22,6 @@ shipping.quote_melhor_envio = lambda cep, package, value, qty, token: [
 def test_invalid_and_unknown_cep():
     assert shipping.estimate_shipping("123", VIOLAO)["status"] == "cep_invalido"
     assert shipping.estimate_shipping("99999-999", VIOLAO)["status"] == "cep_nao_encontrado"
-    print("✅ test_invalid_and_unknown_cep: OK")
 
 
 def test_campo_grande_rule_from_manual():
@@ -30,12 +29,10 @@ def test_campo_grande_rule_from_manual():
     assert above["opcoes"][0]["preco"] == 0.0 and above["opcoes"][0]["prazo"] == "1 a 3 dias úteis"
     below = shipping.estimate_shipping("79002000", UKULELE)
     assert below["opcoes"][0]["preco"] == 35.0
-    print("✅ test_campo_grande_rule_from_manual: OK")
 
 
 def test_large_instruments_need_special_quote():
     assert shipping.estimate_shipping("01310-100", BATERIA)["status"] == "frete_especial"
-    print("✅ test_large_instruments_need_special_quote: OK")
 
 
 def test_other_city_with_and_without_token():
@@ -45,7 +42,6 @@ def test_other_city_with_and_without_token():
     result = shipping.estimate_shipping("01310100", VIOLAO)
     assert result["status"] == "ok" and result["opcoes"][0]["preco"] == 156.48
     os.environ.pop("MELHOR_ENVIO_TOKEN")
-    print("✅ test_other_city_with_and_without_token: OK")
 
 
 def test_parse_quote_drops_refused_services():
@@ -57,14 +53,3 @@ def test_parse_quote_drops_refused_services():
     parsed = shipping.parse_quote(raw)
     assert [o["servico"] for o in parsed] == [".Package", ".Com"]
     assert parsed[0]["preco"] == 156.48
-    print("✅ test_parse_quote_drops_refused_services: OK")
-
-
-if __name__ == "__main__":
-    print("🧪 Executando testes de frete...\n")
-    test_invalid_and_unknown_cep()
-    test_campo_grande_rule_from_manual()
-    test_large_instruments_need_special_quote()
-    test_other_city_with_and_without_token()
-    test_parse_quote_drops_refused_services()
-    print("\n✅ Todos os testes passaram!")

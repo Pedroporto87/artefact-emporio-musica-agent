@@ -1,4 +1,4 @@
-"""Testes para data_loader.py — sem chamar LLM."""
+"""Testes para data_loader.py (sem chamar o LLM)."""
 
 import sys
 from pathlib import Path
@@ -21,8 +21,6 @@ def test_load_all():
     assert loader.order_items is not None
     assert loader.promotions is not None
 
-    print("✅ test_load_all: OK")
-
 
 def test_products_schema():
     """Verifica schema do products."""
@@ -38,8 +36,6 @@ def test_products_schema():
     assert loader.products["price_brl"].dtype == "float64"
     assert loader.products["stock_quantity"].dtype == "int64"
 
-    print("✅ test_products_schema: OK")
-
 
 def test_normalize_text():
     """Testa normalização de texto (remoção de acentos)."""
@@ -48,16 +44,12 @@ def test_normalize_text():
     assert DataLoader._normalize_text("São Paulo") == "sao paulo"
     assert DataLoader._normalize_text("Yamaha C70") == "yamaha c70"
 
-    print("✅ test_normalize_text: OK")
-
 
 def test_normalize_phone():
     """Testa normalização de telefone."""
     assert DataLoader._normalize_phone("(67) 99812-3456") == "67998123456"
     assert DataLoader._normalize_phone("67 99812-3456") == "67998123456"
     assert DataLoader._normalize_phone("67998123456") == "67998123456"
-
-    print("✅ test_normalize_phone: OK")
 
 
 def test_parse_specs():
@@ -71,8 +63,6 @@ def test_parse_specs():
     specs_escaped = '{"top":"Spruce Sólido","back_sides":"Nato"}'
     result2 = DataLoader._parse_specs(specs_escaped)
     assert isinstance(result2, dict)
-
-    print("✅ test_parse_specs: OK")
 
 
 def test_get_category_name():
@@ -88,8 +78,6 @@ def test_get_category_name():
     cat_none = loader.get_category_name(999)
     assert cat_none is None
 
-    print("✅ test_get_category_name: OK")
-
 
 def test_verify_customer_email():
     """Testa verificação de cliente por email."""
@@ -103,8 +91,6 @@ def test_verify_customer_email():
     # Email errado
     verified_wrong = loader.verify_customer(1, email="wrong@email.com")
     assert verified_wrong is False, "Email errado deveria falhar"
-
-    print("✅ test_verify_customer_email: OK")
 
 
 def test_verify_customer_phone():
@@ -124,8 +110,6 @@ def test_verify_customer_phone():
     verified_wrong = loader.verify_customer(1, phone="(67) 99999-9999")
     assert verified_wrong is False, "Phone errado deveria falhar"
 
-    print("✅ test_verify_customer_phone: OK")
-
 
 def test_get_product_with_promotion():
     """Testa busca de produto com promoção ativa."""
@@ -144,8 +128,6 @@ def test_get_product_with_promotion():
         assert "discount_percent" in prod["promotion"]
         assert "discounted_price" in prod["promotion"]
 
-    print("✅ test_get_product_with_promotion: OK")
-
 
 def test_pix_price_not_cumulative():
     """PIX dá 5% só fora de promoção (manual, seções 3 e 6.2)."""
@@ -160,8 +142,6 @@ def test_pix_price_not_cumulative():
     assert promo["promotion"] is not None
     assert promo["pix_price"] is None
 
-    print("✅ test_pix_price_not_cumulative: OK")
-
 
 def test_nonexistent_product():
     """Testa busca de produto inexistente."""
@@ -170,23 +150,3 @@ def test_nonexistent_product():
 
     prod = loader.get_product_with_promotion(99999)
     assert prod is None
-
-    print("✅ test_nonexistent_product: OK")
-
-
-if __name__ == "__main__":
-    print("🧪 Executando testes de data_loader...\n")
-
-    test_load_all()
-    test_products_schema()
-    test_normalize_text()
-    test_normalize_phone()
-    test_parse_specs()
-    test_get_category_name()
-    test_verify_customer_email()
-    test_verify_customer_phone()
-    test_get_product_with_promotion()
-    test_pix_price_not_cumulative()
-    test_nonexistent_product()
-
-    print("\n✅ Todos os testes passaram!")

@@ -185,6 +185,7 @@ class MusicaAgent:
                     price_max=tool_input.get("price_max"),
                     in_stock_only=tool_input.get("in_stock_only", True),
                     limit=tool_input.get("limit", 10),
+                    order=tool_input.get("order", "menor_preco"),
                 )
             if tool_name == "get_product_details":
                 result = self.product_tools.get_product_details(tool_input.get("product_id"))

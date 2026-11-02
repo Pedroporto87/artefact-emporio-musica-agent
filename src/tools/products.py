@@ -22,6 +22,7 @@ class ProductTools:
         price_max: Optional[float] = None,
         in_stock_only: bool = True,
         limit: int = 10,
+        order: str = "menor_preco",
     ) -> Dict:
         """
         Busca produtos com filtros.
@@ -96,10 +97,10 @@ class ProductTools:
                 }
             results = in_stock
 
-        # Ordenar por preço
-        results = results.sort_values("price_brl")
-
-        # Limitar resultados
+        # A ordem é decidida aqui: com a lista cortada em `limit`, o modelo não tem como achar o
+        # "mais caro" sozinho se receber só os mais baratos.
+        results = results.sort_values("price_brl", ascending=(order != "maior_preco"))
+        total_found = len(results)
         results = results.head(limit)
 
         # Formatar resposta
@@ -122,7 +123,13 @@ class ProductTools:
 
             output.append(prod)
 
-        return {"status": "ok", "produtos": output}
+        return {
+            "status": "ok",
+            "ordenado_por": "maior preço primeiro" if order == "maior_preco" else "menor preço primeiro",
+            "total_encontrado": total_found,
+            "mostrando": len(output),
+            "produtos": output,
+        }
 
     def categories_with_products(self) -> List[str]:
         """Nomes das categorias que têm ao menos um produto no catálogo."""

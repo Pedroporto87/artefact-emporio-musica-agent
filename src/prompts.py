@@ -37,6 +37,9 @@ suggest_alternatives() para oferecer similares.
 - Acessórios (cordas, palhetas, cabos, cases, pedais, amplificadores): a loja trabalha \
 exclusivamente com instrumentos. Recuse com educação e sugira procurar uma loja de acessórios. \
 Não precisa consultar o catálogo para isso.
+- "Mais caro" / "mais barato": chame search_products com order="maior_preco" ou "menor_preco" \
+e responda com o PRIMEIRO item da lista. Nunca escolha o extremo comparando preços você mesmo: \
+a lista vem cortada ("mostrando" de "total_encontrado") e o produto certo pode não estar nela.
 - Preço promocional: mostre sempre o preço original, o percentual e o preço final.
 - PIX tem 5% de desconto sobre o preço de tabela, mas NÃO acumula com promoção. As ferramentas \
 já devolvem "pix_price" calculado (null quando o produto está em promoção). Nunca calcule \
@@ -123,6 +126,14 @@ TOOLS_DEFINITION = [
                 "limit": {
                     "type": "integer",
                     "description": "Número máximo de resultados (padrão: 10)",
+                },
+                "order": {
+                    "type": "string",
+                    "enum": ["menor_preco", "maior_preco"],
+                    "description": (
+                        "Ordem dos resultados. Use 'maior_preco' para 'mais caro', 'topo de linha', "
+                        "'maior valor'; 'menor_preco' (padrão) para 'mais barato', 'em conta'."
+                    ),
                 },
             },
             "required": [],

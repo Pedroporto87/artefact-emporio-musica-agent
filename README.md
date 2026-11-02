@@ -59,6 +59,7 @@ Digite `sair` para encerrar.
 ```bash
 python tests/test_data_loader.py
 python tests/test_policies.py
+python tests/test_products.py
 ```
 
 ---
@@ -136,6 +137,7 @@ Se uma das regras falhar, o modelo recebe o problema e reescreve a resposta, uma
 
 - **Preço no PIX:** o código calcula 5% de desconto e devolve `null` quando o produto está em promoção, porque o manual diz que os descontos não acumulam.
 - **Promoção vigente:** o preço final é calculado a partir do `discount_percent` da promoção com `is_active = 1`.
+- **Mais caro e mais barato:** `search_products` recebe `order` (`maior_preco` ou `menor_preco`) e informa `total_encontrado`. Antes, a lista vinha sempre do mais barato para o mais caro e cortada em 10 itens. Ao ouvir "qual o violão mais caro?", a Marina escolhia dentro dos 10 mais baratos e respondia R$ 429,90, quando o mais caro custa R$ 12.000,00.
 - **Loja aberta agora:** `get_store_status` usa o horário de Campo Grande (UTC-4, sem horário de verão desde 2019), o horário do manual e os feriados nacionais de data fixa. A resposta inclui a próxima abertura, por exemplo "terça-feira, 03/11 às 09:00".
 
 **Por quê:** LLM erra aritmética e não sabe que dia é hoje.
@@ -223,7 +225,7 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 
 ## Limitações conhecidas
 
-- **Erros de raciocínio do modelo não são detectados.** Num teste, a Marina disse que o violão de R$ 459,90 era "o mais barato" de uma lista que tinha um de R$ 429,90. Os preços citados estavam certos, então a checagem não pegou. A solução seria uma ferramenta de ordenação, ou deixar a seleção do "mais barato" no código.
+- **Erros de raciocínio do modelo não são detectados.** A checagem confere números e negações, não a lógica da resposta. O caso mais visível ("qual o violão mais caro?" respondido com o mais barato) foi resolvido no código: ver a decisão 5.
 - **Respostas variam entre execuções.** O mesmo pedido pode gerar listas diferentes ou chamadas de ferramentas desnecessárias (por exemplo, consultar o horário numa pergunta sobre frete).
 - **A checagem corrige uma vez só.** Se o modelo errar de novo na reescrita, a resposta sai assim.
 - **Frete para outras cidades não é calculado.** O manual diz que depende de CEP, peso e dimensões, dados que não temos. O agente explica as modalidades e encaminha para a equipe.
@@ -246,6 +248,7 @@ O enunciado pede para assumir interpretações razoáveis e documentá-las.
 ```bash
 python tests/test_data_loader.py   # 11 testes: carga, tipos, normalização, verificação, promoção, PIX
 python tests/test_policies.py      # 4 testes: manual extraído, horário, sábado, domingo e Finados
+python tests/test_products.py      # 4 testes: ordenação por preço, status da busca, busca por nome parcial
 ```
 
 ---

@@ -4,6 +4,7 @@ Uso: python src/web.py  ->  http://127.0.0.1:8000
 """
 
 import os
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -67,13 +68,22 @@ def product_card(product_id: int) -> Dict:
 
 def mentioned_products(reply: str, candidate_ids: List[int]) -> List[int]:
     """Dos produtos que as ferramentas devolveram, quais a Marina citou na resposta."""
-    text = DataLoader._normalize_text(reply).replace("-", "")
+    # Compara palavras inteiras: buscar "3" como substring casava com o preço "4.439,00".
+    text = " " + " ".join(re.findall(r"[a-z0-9]+", DataLoader._normalize_text(reply).replace("-", ""))) + " "
     names = loader.products.set_index("product_id")["name_normalized"]
     hits = []
     for pid in candidate_ids:
-        words = names[pid].replace("-", "").split()
-        model = next((w for w in words if any(c.isdigit() for c in w)), None)
-        if " ".join(words) in text or (words[0] in text and model and model in text):
+        words = re.findall(r"[a-z0-9]+", names[pid].replace("-", ""))
+        idx = next((i for i, w in enumerate(words) if any(c.isdigit() for c in w)), None)
+        if idx is None:
+            model_phrase = None
+        elif words[idx].isdigit() and idx > 0:
+            model_phrase = f"{words[idx - 1]} {words[idx]}"  # "kit 3": só o número é ambíguo
+        else:
+            model_phrase = words[idx]
+        full_name = f" {' '.join(words)} " in text
+        brand_and_model = model_phrase and f" {words[0]} " in text and f" {model_phrase} " in text
+        if full_name or brand_and_model:
             hits.append(pid)
     if hits:
         return hits[:MAX_CARDS]

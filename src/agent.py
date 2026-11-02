@@ -46,7 +46,8 @@ OPENAI_TOOLS = [
 
 
 class MusicaAgent:
-    def __init__(self, api_key: str, model: str = None, base_url: str = None, verbose: bool = False):
+    def __init__(self, api_key: str, model: str = None, base_url: str = None, verbose: bool = False,
+                 loader: DataLoader = None):
         self.client = OpenAI(
             api_key=api_key,
             base_url=base_url or os.getenv("LLM_BASE_URL") or DEFAULT_BASE_URL,
@@ -54,18 +55,23 @@ class MusicaAgent:
         self.model = model or os.getenv("LLM_MODEL") or DEFAULT_MODEL
         self.verbose = verbose
 
-        self.loader = DataLoader()
-        self.loader.load_all()
+        if loader is None:
+            loader = DataLoader()
+            loader.load_all()
+        self.loader = loader
 
         self.product_tools = ProductTools(self.loader)
         self.order_tools = OrderTools(self.loader)
         self.system_prompt = build_system_prompt(load_manual_text())
 
         self.conversation_history: List[Dict[str, Any]] = []
+        # IDs de produtos devolvidos pelas ferramentas no último turno (a home page mostra os cards).
+        self.last_product_ids: List[int] = []
 
     def process_message(self, user_message: str) -> str:
         """Processa uma mensagem do cliente e retorna a resposta do agente."""
         self.conversation_history.append({"role": "user", "content": user_message})
+        self.last_product_ids = []
         # Mensagens de correção da checagem de preços: vão para o modelo, mas não ficam no histórico.
         correction: List[Dict[str, Any]] = []
         product_tool_called = False
@@ -101,6 +107,7 @@ class MusicaAgent:
                         args = {}
                     result = self._execute_tool(tc.function.name, args)
                     product_tool_called |= tc.function.name in PRODUCT_TOOLS
+                    self._collect_product_ids(result)
                     if self.verbose:
                         print(f"  [tool] {tc.function.name}({args})")
                     self.conversation_history.append({
@@ -132,6 +139,17 @@ class MusicaAgent:
             )
 
         return "Desculpe, não consegui concluir sua solicitação agora. Pode reformular a pergunta? 😕"
+
+    def _collect_product_ids(self, obj: Any) -> None:
+        if isinstance(obj, dict):
+            pid = obj.get("product_id")
+            if isinstance(pid, int) and pid not in self.last_product_ids:
+                self.last_product_ids.append(pid)
+            for value in obj.values():
+                self._collect_product_ids(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                self._collect_product_ids(item)
 
     def _grounding_problem(self, text: str, product_tool_called: bool) -> str:
         """Descreve por que a resposta não está apoiada em dados, ou "" se estiver ok."""

@@ -9,8 +9,8 @@ import unicodedata
 
 
 class DataLoader:
-    def __init__(self, data_dir: str = "data"):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: Optional[str] = None):
+        self.data_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parent.parent / "data"
         self.products = None
         self.categories = None
         self.customers = None

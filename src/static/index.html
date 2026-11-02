@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Empório da Música</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">♪</span>
+      <div>
+        <h1>Empório da Música</h1>
+        <p class="tagline">Sua música começa aqui.</p>
+      </div>
+    </div>
+    <div class="store-info">
+      <span id="store-status" class="status-pill">Carregando…</span>
+      <span class="address">Rua 14 de Maio, 3200 — Centro, Campo Grande/MS · (67) 3341-4444</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <main class="catalog">
+      <div class="catalog-head">
+        <h2>Nosso catálogo</h2>
+        <input id="search" type="search" placeholder="Buscar por nome ou marca…" aria-label="Buscar produtos">
+      </div>
+      <nav id="categories" class="chips" aria-label="Categorias"></nav>
+      <p id="result-count" class="muted"></p>
+      <section id="grid" class="grid" aria-live="polite"></section>
+    </main>
+
+    <aside id="chat" class="chat" aria-label="Chat com a Marina">
+      <div class="chat-head">
+        <div class="avatar" aria-hidden="true">M</div>
+        <div>
+          <strong>Marina</strong>
+          <span class="muted small">Assistente virtual da loja</span>
+        </div>
+        <button id="chat-close" class="icon-btn only-mobile" aria-label="Fechar chat">✕</button>
+      </div>
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <div id="suggestions" class="suggestions"></div>
+      <form id="chat-form" class="chat-form">
+        <input id="chat-input" type="text" maxlength="1000" placeholder="Escreva sua mensagem…" autocomplete="off" aria-label="Mensagem">
+        <button type="submit" class="send-btn">Enviar</button>
+      </form>
+    </aside>
+  </div>
+
+  <button id="chat-open" class="chat-fab only-mobile">💬 Fale com a Marina</button>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

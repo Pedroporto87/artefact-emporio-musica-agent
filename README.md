@@ -1,491 +1,287 @@
-# 🎵 Empório da Música — Agente de Atendimento
+# Empório da Música: agente de atendimento
 
-> Agente de atendimento por mensagens de texto para a Empório da Música  
-> **Case Técnico - Vaga AI Engineer (Artefact)**
+Protótipo de um agente de atendimento por mensagens para a **Empório da Música**, loja fictícia de instrumentos musicais em Campo Grande/MS. Case técnico para a vaga de AI Engineer da Artefact.
 
----
+A **Marina**, assistente virtual da loja, responde sobre:
 
-## 📌 Resumo
+- **Catálogo**: produtos, preços, estoque, promoções vigentes e preço no PIX.
+- **Pedidos**: status e rastreio, só depois de verificar a identidade do cliente.
+- **Políticas**: horário, pagamento, frete, trocas, garantia e privacidade, com base no manual da loja.
+- **Fora do escopo**: recusa com simpatia e redireciona para o que a loja faz.
 
-Protótipo de um **agente de atendimento inteligente** que auxilia a equipe da Empório da Música respondendo dúvidas recorrentes de clientes sobre:
-- 🎸 Disponibilidade e preço de instrumentos
-- 📦 Status de pedidos (com verificação de identidade)
-- 📋 Políticas da loja (devoluções, horários, pagamentos)
-- ❌ Recusas educadas para perguntas fora do escopo
-
-**Arquitetura:** Agente ReAct com **function calling** (Claude Haiku 3.5)  
-**Linguagem:** Python 3.9+  
-**Interface:** CLI interativa  
-**Status:** ✅ Completo e funcional
+Há duas interfaces: uma **home page** com o catálogo e o chat da Marina, e uma **CLI**.
 
 ---
 
-## 🚀 Como Rodar
+## Como rodar
 
-### Pré-requisitos
-- Python 3.9 ou superior
-- Chave de API da Anthropic (obter em https://console.anthropic.com)
-
-### 1. Clonar e Configurar Ambiente
+**Requisitos:** Python 3.10 ou superior (desenvolvido e testado com Python 3.15 no Windows) e uma chave do [OpenRouter](https://openrouter.ai).
 
 ```bash
 git clone https://github.com/Pedroporto87/artefact-emporio-musica-agent.git
 cd artefact-emporio-musica-agent
 
-# Criar virtual environment
 python -m venv venv
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # Linux/Mac
 
-# Ativar (Linux/Mac)
-source venv/bin/activate
-
-# Ativar (Windows)
-venv\Scripts\activate
-
-# Instalar dependências
 pip install -r requirements.txt
 ```
 
-### 2. Configurar API Key
+Copie `.env.example` para `.env` e preencha a chave:
 
-```bash
-# Copiar arquivo de exemplo
-cp .env.example .env
-
-# Editar .env e adicionar sua chave
-# ANTHROPIC_API_KEY=sk-ant-xxxxxxx...
+```env
+LLM_API_KEY=sk-or-v1-...
+LLM_MODEL=openai/gpt-4o-mini
+LLM_BASE_URL=https://openrouter.ai/api/v1
 ```
 
-**⚠️ Nunca commite .env! Usar apenas .env.example no repositório.**
+O `.env` está no `.gitignore` e nunca é versionado.
 
-### 3. Executar Agent
+**Home page (catálogo + chat):**
 
 ```bash
-# Modo interativo (conversa)
+python src/web.py
+```
+
+Acesse http://127.0.0.1:8000.
+
+**CLI:**
+
+```bash
 python src/main.py
-
-# Modo arquivo (para gerar exemplos)
-python src/main.py input.txt output.md
 ```
 
-Exemplo interativo:
-```
-🎵 EMPÓRIO DA MÚSICA - Atendimento por Chat
-============================================================
-Olá! Eu sou Marina, sua assistente. 😊
+Digite `sair` para encerrar.
 
-Como posso ajudar você hoje?
-(Digite 'sair' para encerrar a conversa)
-============================================================
-
-Você: Quais violões vocês têm?
-Agente: 🎸 Encontrei 5 violões em estoque...
-```
-
-### 4. Executar Testes
-
-```bash
-# Testes do data_loader (determinísticos, sem LLM)
-python tests/test_data_loader.py
-
-# Saída esperada:
-# ✅ test_load_all: OK
-# ✅ test_products_schema: OK
-# ... (10 testes)
-# ✅ Todos os testes passaram!
-```
-
----
-
-## 🏗️ Arquitetura & Decisões Técnicas
-
-### Framework: ReAct + Function Calling
-
-**O que é:** Padrão ReAct (Reasoning + Acting) onde:
-1. Claude **raciocina** sobre a pergunta
-2. Decide qual **ferramenta chamar** (function calling)
-3. Agente **executa** a ferramenta
-4. Claude **interpreta** resultado e responde
-
-**Por que essa escolha:**
-| Alternativa | Motivo de Rejeição |
-|------------|------------------|
-| RAG Puro | PDF cabe 100% no contexto (~45K tokens), overhead desnecessário |
-| SQL Direto | LLM gera SQL ruim, queremos controle total sobre queries |
-| Agente sem Tools | Alucina preços/prazos — inaceitável em e-commerce |
-| Embeddings/Semantic | Dados estruturados, não texto; fuzzy matching é suficiente |
-
-**Benefício principal:** Nunca inventa dados. Preço, estoque e políticas vêm **sempre** das ferramentas.
-
----
-
-### Modelo: Claude 3.5 Haiku
-
-**Decisão:** `claude-3-5-haiku-20241022` (Anthropic API)
-
-| Aspecto | Haiku vs. Alternativas |
-|---------|----------------------|
-| **Custo** | $0.80/1M input tokens (vs. GPT-4o-mini $0.15, mas Haiku funciona bem) |
-| **Speed** | ~200ms latência (ideal para chat) |
-| **Function Calling** | ✅ Excelente (native tools support) |
-| **PT-BR** | ✅ Muito bom (treino inclui português) |
-| **Context** | 80K tokens (suficiente para histórico + ferramentas) |
-
-**Alternativas consideradas:**
-- ❌ GPT-4o-mini: Melhor em English, PT-BR é fraco para persona coloquial
-- ❌ Gemini Flash: Menos testado em function calling, menos estável
-- ❌ Llama local: Sem function calling nativo, requer boilerplate
-
----
-
-### Ferramentas (9 no Total)
-
-Cada ferramenta:
-- ✅ Determinística (sem IA)
-- ✅ Documentada com JSON Schema
-- ✅ Testes unitários
-
-```python
-# Exemplo: search_products
-def search_products(
-    category_name: str = None,
-    brand: str = None,
-    price_min: float = None,
-    price_max: float = None,
-    in_stock_only: bool = True,
-    limit: int = 10
-) -> List[Dict]:
-    """Busca produtos com filtros (category, brand, price, stock)"""
-```
-
-**Lista Completa:**
-
-| Ferramenta | Entrada | Saída | Fonte |
-|-----------|--------|-------|-------|
-| `search_products` | categoria, marca, preço_min/max | Lista de produtos | products.csv |
-| `get_product_details` | product_id | Detalhes + specs + promoção | products.csv + promotions.csv |
-| `list_active_promotions` | — | Promos vigentes (is_active=1) | promotions.csv |
-| `suggest_alternatives` | product_id | Similares em estoque | products.csv |
-| `search_by_name` | product_name | Busca fuzzy por nome | products.csv |
-| `check_order_status` | order_id, email/phone | Status + tracking + entrega | orders.csv + verificação |
-| `get_customer_orders` | email/phone | Histórico de pedidos | orders.csv + customers.csv |
-| `get_policies_excerpt` | topic | Trecho do manual | PDF |
-| `query_policies` | question | Resposta baseada no manual | PDF |
-
----
-
-### Dados & Normalização
-
-#### Carregamento (src/data_loader.py)
-
-```python
-loader = DataLoader()
-loader.load_all()  # Carrega todos os 6 CSVs
-
-# Normalização automática:
-# - Tipos: int, float, datetime
-# - JSON: specs → dict
-# - Acentos: "Violão" → "violao" (busca fuzzy)
-# - Phone: "(67) 99812-3456" → "6799812345" (verificação)
-```
-
-#### Limpeza Aplicada
-
-| Campo | Ação | Motivo |
-|-------|------|--------|
-| `price_brl` | Converter para float | CSV pode ter "11.499,00" |
-| `stock_quantity` | Garantir int | Verificar zero vs. negativo |
-| `specs` | Parse JSON | Separar atributos para busca |
-| `name_normalized` | Remover acentos, lowercase | Busca fuzzy insensível a case/acentos |
-| `phone_normalized` | Manter apenas dígitos | Verificação de identidade tolerante |
-| `is_active` (promo) | Converter 0/1 → bool | Lógica clara |
-
----
-
-### Verificação de Identidade (3 Vias)
-
-**Requisito do Case:** Três vias de verificação
-
-**Implementado:**
-1. ✅ **Email** — `customers.csv` tem email único
-2. ✅ **Telefone** — `customers.csv` tem phone, normalizado
-3. ❌ **CPF** — `customers.csv` não contém CPF
-
-**Comportamento:**
-```python
-# Cliente quer consultar pedido
-order_tools.check_order_status(
-    order_id=10,
-    customer_verification="lucas.mendes@jmail.com"  # ou "(67) 99812-3456"
-)
-```
-
-Se falhar na verificação, retorna erro amigável sem expor dados.
-
----
-
-### PDF de Políticas
-
-#### Abordagem: Injetar no Contexto
-
-**Por quê:** PDF ~180 KB → ~45K tokens, cabe fácil no contexto de 80K do Haiku.
-
-```python
-policies = PolicyTools()
-policies.load_policies()  # Extrai com pdfplumber, caches
-excerpt = policies.get_policies_excerpt("devolução")
-```
-
-**Se PDF fosse > 100KB:**
-- Implementaríamos RAG leve (chunking por seção + embeddings)
-- FAISS ou SQLite FTS para indexação
-- ~30 min de implementação
-
----
-
-### CLI Interativa (main.py)
-
-```
-🎵 EMPÓRIO DA MÚSICA - Atendimento por Chat
-============================================================
-
-Você: Quais violões até R$1000?
-
-Agente: 🎸 Encontrei 3 violões:
-  1. Tagima AC-39 - R$ 429,90 (15 em estoque)
-  2. Yamaha C40 - R$ 599,90 (12 em estoque)
-  ...
-
-Você: Qual desses em promoção?
-Agente: [consulta banco de dados]
-```
-
-**Modo arquivo** (para gerar exemplos):
-```bash
-python src/main.py input.txt output.md
-```
-
----
-
-## 📋 Suposições Documentadas
-
-| # | Suposição | Justificativa | Impacto |
-|---|-----------|---------------|--------|
-| **1** | CPF não é obrigatório (3 vias = email + phone) | `customers.csv` não tem CPF | Usar apenas email/phone funciona bem |
-| **2** | PDF cabe no contexto | ~180 KB = ~45K tokens | Não precisa RAG complexa |
-| **3** | `is_active=1` = vigente agora (sem window de datas) | `promotions.csv` não tem date_start/end | Assume promoção ativa = ativa hoje |
-| **4** | Dados históricos (pedidos em 2025-10 até 2026-03, agora é 2026-11) | Fornecidos pela loja como exemple | Não confundir com dados atuais |
-| **5** | Busca fuzzy é suficiente (não precisa NER/embedding) | Catálogo pequeno (65 produtos), nomes bem estruturados | Funcionou nos exemplos |
-| **6** | "Fora do escopo" = rejeitar aulas, recomendações pessoais, origem da loja | Enunciado: "perguntas recorrentes de atendimento" | Redirecionamos educadamente |
-| **7** | Idioma = PT-BR (código em inglês, prompts em PT-BR) | Explícito no CLAUDE.md | Validado em exemplos |
-
----
-
-## ⚠️ Limitações Conhecidas & Futuras
-
-### Não Implementado (Escopo Small)
-| Feature | Motivo | Tempo para Implementar |
-|---------|--------|----------------------|
-| Persistência entre sessões | Histórico reseta ao encerrar | 20 min (SQLite) |
-| API REST | CLI é suficiente | 30 min (FastAPI) |
-| Integração com WhatsApp | Escopo além do case | 2h (twilio) |
-| Busca semântica no PDF | Injeção total funciona | 45 min (embeddings) |
-| Suporte a fotos/imagens | Não solicitado | - |
-| Multi-idioma | Apenas PT-BR | - |
-
-### Limitações Conhecidas
-
-1. **PDF Parsing Frágil**
-   - Se PDF mudar de formato, busca por keyword pode falhar
-   - Solução: RAG leve com chunking inteligente
-
-2. **Estoque Real-Time**
-   - Dados são estáticos (CSVs); sem sync com ERP
-   - Solução: API de inventário integrada
-
-3. **CPF Não Disponível**
-   - Verificação fica limitada a email/phone
-   - Solução: Adicionar CPF ao CSV de clientes
-
-4. **Sem Histórico Persistente**
-   - Conversa reseta ao encerrar programa
-   - Solução: SQLite com schema simples
-
-5. **Sem Rate Limiting**
-   - Sem proteção contra abuso de API
-   - Solução: Adicionar rate limiting na CLI
-
----
-
-## 🧪 Testes
-
-**Testes inclusos:** 10 testes determinísticos (sem LLM) em `tests/test_data_loader.py`
+**Testes** (determinísticos, sem chamar o LLM):
 
 ```bash
 python tests/test_data_loader.py
+python tests/test_policies.py
 ```
-
-**Cobertura:**
-- ✅ Schema dos CSVs
-- ✅ Normalização (texto, phone)
-- ✅ Parsing de JSON
-- ✅ Busca de categoria/cliente/produto
-- ✅ Promoções ativas
-- ✅ Verificação de identidade
-
-**Não Testado:** Agent loop (requer interação LLM), testes de integração (complexo sem mock)
 
 ---
 
-## 📊 Estrutura dos Arquivos
+## Arquitetura
 
 ```
-.
-├── README.md                    # Este arquivo
-├── requirements.txt             # pip install -r requirements.txt
-├── .env.example                 # Copiar para .env + preencher ANTHROPIC_API_KEY
-├── .gitignore
-├── data/                        # Dados fornecidos (NÃO EDITAR)
-│   ├── products.csv
-│   ├── categories.csv
-│   ├── customers.csv
-│   ├── orders.csv
-│   ├── order_items.csv
-│   ├── promotions.csv
-│   └── políticas_da_loja.pdf
+Cliente ──► Home page (src/static)  ──► FastAPI (src/web.py) ─┐
+        └─► CLI (src/main.py) ─────────────────────────────────┤
+                                                               ▼
+                                              MusicaAgent (src/agent.py)
+                         system prompt = persona + regras + MANUAL DA LOJA (PDF inteiro)
+                                                               │  function calling
+               ┌───────────────────────────┬───────────────────┼─────────────────────┐
+               ▼                           ▼                   ▼                     ▼
+   ProductTools (catálogo)        OrderTools (pedidos)   get_store_status     Checagem de respostas
+   busca, detalhes, promoções,    status com verificação  (data/hora e         (preço sem origem,
+   alternativas, preço PIX        de identidade           loja aberta?)        negação sem consulta)
+               └───────────────────────────┴──────────────┘
+                                 DataLoader (CSVs limpos em pandas)
+```
+
+O LLM decide **o que** consultar e **como** falar. Tudo o que é dado (preço, estoque, status, horário, desconto) vem de código determinístico.
+
+---
+
+## Decisões técnicas
+
+### 1. Function calling em vez de RAG puro ou agente SQL
+
+**Decisão:** o LLM tem 8 ferramentas tipadas (busca de produtos, detalhes, promoções, alternativas, busca por nome, status do pedido, pedidos do cliente e status da loja) e escolhe quais chamar.
+
+**Por quê:** as perguntas mais frequentes envolvem números que não podem estar errados. Com ferramentas, o preço vem da tabela, não da memória do modelo, e cada ferramenta pode ser testada sem LLM.
+
+**Alternativas descartadas:**
+- **RAG sobre os CSVs:** busca semântica não sabe fazer "preço até R$ 1.000" ou "em estoque". São filtros exatos.
+- **Agente que gera SQL:** mais flexível, mas o modelo poderia montar consultas erradas ou ler a tabela de clientes sem verificação de identidade. Com ferramentas, a verificação fica no código.
+
+### 2. Manual de políticas inteiro no prompt, sem RAG
+
+**Decisão:** o PDF (8 páginas, cerca de 11 mil caracteres, uns 3 mil tokens) é extraído com `pdfplumber` e vai integralmente no system prompt.
+
+**Por quê:** cabe com folga no contexto. Assim o modelo vê todas as regras e as exceções juntas. Por exemplo, o desconto de 5% no PIX (seção 3) não acumula com promoção (seção 6.2). Um RAG com top-k poderia trazer um trecho e esquecer o outro.
+
+**Histórico:** a primeira versão buscava linhas do PDF por palavra-chave e devolvia no máximo 5 linhas. Nos testes, regras se perdiam, e "qual o endereço?" ficava sem resposta. A troca resolveu os dois problemas.
+
+**Quando mudaria:** com um manual de dezenas de páginas, eu partiria para chunking por seção, embeddings e top-k.
+
+### 3. Ferramentas devolvem um `status` explícito
+
+**Decisão:** a busca de produtos não devolve só uma lista. Ela devolve `ok`, `sem_estoque`, `nao_vendemos`, `categoria_sem_produtos`, `nao_encontrado` ou `nenhum_resultado`.
+
+**Por quê:** com lista vazia, o modelo não sabe se a loja não vende o item ou se ele acabou. Nos testes, o agente respondia "atabaques sem estoque no momento", sugerindo que voltariam, para algo que a loja nunca vendeu. Com o status, cada caso tem uma resposta certa:
+
+| Situação | Exemplo | Resposta esperada |
+|---|---|---|
+| Não está no catálogo nem nas categorias | atabaque | "Não trabalhamos com atabaques" |
+| Categoria da loja sem modelos cadastrados | violino (Cordas Orquestrais) | "Não há modelos no catálogo agora", com contato da equipe |
+| Existe, mas sem estoque | Giannini GF-3D | "Temporariamente indisponível" e sugestões de alternativas |
+| Acessório | cordas, pedais | "A loja trabalha só com instrumentos" (manual, seção 7.1) |
+
+### 4. Checagem determinística da resposta antes de enviar
+
+**Decisão:** antes de devolver a resposta, o agente confere dois pontos:
+1. Todo valor em R$ citado precisa aparecer em um resultado de ferramenta, no manual ou na mensagem do cliente.
+2. Se a resposta disser "não temos" ou "não trabalhamos", alguma ferramenta de catálogo precisa ter sido chamada naquele turno.
+
+Se uma das regras falhar, o modelo recebe o problema e reescreve a resposta, uma única vez. A correção não aparece para o cliente.
+
+**Por quê:** instrução no prompt reduz a invenção de dados, mas não elimina. Nos testes, essa checagem pegou casos reais: um preço inventado (R$ 849,90 para um produto de R$ 849,00) e "não trabalhamos com baterias", sendo que a loja vende três.
+
+**Limite:** a checagem confere números e negações, não o raciocínio. Ver [Limitações](#limitações-conhecidas).
+
+### 5. Contas e datas no código, não no LLM
+
+- **Preço no PIX:** o código calcula 5% de desconto e devolve `null` quando o produto está em promoção, porque o manual diz que os descontos não acumulam.
+- **Promoção vigente:** o preço final é calculado a partir do `discount_percent` da promoção com `is_active = 1`.
+- **Loja aberta agora:** `get_store_status` usa o horário de Campo Grande (UTC-4, sem horário de verão desde 2019), o horário do manual e os feriados nacionais de data fixa. A resposta inclui a próxima abertura, por exemplo "terça-feira, 03/11 às 09:00".
+
+**Por quê:** LLM erra aritmética e não sabe que dia é hoje.
+
+### 6. Modelo e provedor: `openai/gpt-4o-mini` via OpenRouter
+
+**Decisão:** API compatível com OpenAI apontando para o OpenRouter. O modelo é configurável no `.env`.
+
+**Por quê:**
+- O OpenRouter permite trocar de modelo sem mudar código, só com o `LLM_MODEL`.
+- Eu já tinha uma chave do OpenRouter, o que evitou pagar outra API só para o protótipo.
+- O `gpt-4o-mini` é barato, rápido e foi o modelo com que todo o comportamento foi validado: tool calling, português e persona.
+
+**Histórico:** o plano inicial era Claude Haiku pela API da Anthropic. Ao migrar para o OpenRouter, o primeiro modelo testado (`google/gemini-3.6-flash`) retornava `MALFORMED_FUNCTION_CALL`. A causa era um bug meu: as ferramentas estavam no formato da API da Anthropic, e o modelo estava fixo no código, ignorando o `.env`. Depois da correção, validei o `gpt-4o-mini`. Os outros modelos não foram reavaliados.
+
+### 7. Verificação de identidade para pedidos
+
+**Decisão:** antes de mostrar um pedido, o agente pede e-mail ou telefone, e o código confere com o cadastro do cliente daquele pedido. O telefone é comparado só pelos dígitos, então "(67) 99654-7821" e "67996547821" são equivalentes.
+
+**Por quê:** pedido tem dado pessoal, e o manual cita a LGPD (seção 9). A verificação está na ferramenta, não no prompt. Mesmo que o modelo tente, sem e-mail ou telefone corretos a ferramenta não devolve os dados.
+
+**CPF:** o desafio sugere CPF como opção, mas `customers.csv` não tem essa coluna. Ficou só e-mail e telefone (ver [Suposições](#suposições)).
+
+### 8. Tratamento de dados
+
+O `DataLoader` carrega os 6 CSVs com `pandas` em memória (65 produtos, 50 clientes, 20 pedidos). Os tratamentos aplicados:
+
+| Campo | Tratamento | Motivo |
+|---|---|---|
+| Tipos | `int`, `float`, `datetime` explícitos | Evitar comparações erradas entre texto e número |
+| `specs` | JSON → `dict` | Ficha técnica (tampo, cordas, eletrônica) disponível para o agente |
+| Nomes | Sem acento e em minúsculas (`name_normalized`) | Busca tolerante: "violao" encontra "Violão" |
+| Busca por nome | `token_set_ratio` e hífens ignorados | "Takamine GD20" encontra "Takamine GD20 Dreadnought Natural", e "gf3d" encontra "GF-3D" |
+| Categorias | Plural do português e limiar de 90% | Com limiar de 80%, "violinos" casava com "violões" |
+| Telefone | Só dígitos | Verificação independente de formatação |
+
+**Por que não um banco de dados:** com esse volume, `pandas` em memória responde em milissegundos e não exige setup. SQLite faria sentido com escrita (pedidos novos, histórico persistente). Ver [O que faria com mais tempo](#o-que-faria-com-mais-tempo).
+
+### 9. Interfaces: home page em FastAPI + CLI
+
+**Decisão:** FastAPI servindo uma página HTML/CSS/JS sem framework nem build, mais uma CLI.
+
+**Por quê:**
+- Tudo fica em Python no back-end, a única restrição do case.
+- A página mostra o que um chat em texto não mostra: o catálogo por categoria e, quando a Marina cita produtos, cards clicáveis que destacam o item no catálogo.
+- Sem build, é só rodar `python src/web.py`.
+- A CLI continua útil para testar o agente sem navegador.
+
+**Alternativas descartadas:** Streamlit e Gradio são mais rápidos para um chat simples, mas dão pouco controle sobre um layout de catálogo com chat lateral.
+
+### 10. Histórico de conversa em memória, por sessão
+
+**Decisão:** cada visitante da home page (ou execução da CLI) tem uma instância do agente com o histórico em memória. A página guarda o `session_id` no `sessionStorage`.
+
+**Por quê:** o multi-turno é necessário (o agente pede o e-mail numa mensagem e consulta o pedido na seguinte), mas persistir conversas entre reinícios não traz ganho para um protótipo e criaria uma obrigação de LGPD.
+
+### 11. Estratégia de prompt
+
+O system prompt (`src/prompts.py`) tem, nesta ordem:
+1. **Persona**, com o tom de voz do manual (seção 7.1): informal mas profissional.
+2. **De onde vem cada informação**: catálogo só das ferramentas, políticas só do manual, horário só de `get_store_status`.
+3. **Contato oficial**, porque o manual se contradiz (ver Suposições).
+4. **Regras por assunto**: como interpretar cada `status`, acessórios, PIX, status de pedido, reclamações.
+5. **Exemplos de formato**, sem produtos nem preços reais. Quando os exemplos tinham preços reais, o modelo os repetia sem consultar a ferramenta.
+6. **O manual inteiro.**
+
+---
+
+## Suposições
+
+O enunciado pede para assumir interpretações razoáveis e documentá-las.
+
+| # | Ambiguidade | Suposição |
+|---|---|---|
+| 1 | O manual dá dois WhatsApp: (67) 3341-4444 na tabela de dados e (67) 3321-4500 na seção 7 | Usar **(67) 3341-4444**, que aparece duas vezes, inclusive na tabela oficial de dados da empresa |
+| 2 | O e-mail aparece como `empóriodamusica` (com acento, inválido) | Usar `contato@emporiodamusica.com.br` |
+| 3 | O manual diz que a loja vende sopros e cordas orquestrais, mas os CSVs não têm nenhum produto dessas categorias | A loja trabalha com essas categorias, mas não há modelos no catálogo agora. O agente diz isso e oferece contato com a equipe |
+| 4 | `promotions.csv` não tem datas de início e fim | `is_active = 1` significa vigente hoje |
+| 5 | `customers.csv` não tem CPF | Verificação por e-mail ou telefone |
+| 6 | O manual fala em feriados, sem listar quais | Feriados nacionais de data fixa. Os móveis (Carnaval, Sexta-feira Santa, Corpus Christi) não estão incluídos |
+| 7 | Os pedidos vão de 2025 a 2026 | São tratados como dados reais da loja, com o status que está no CSV |
+| 8 | "Fora do escopo" | Tudo que não é catálogo, pedido ou política da loja: futebol, aulas de música, "qual instrumento é melhor" etc. |
+
+---
+
+## Limitações conhecidas
+
+- **Erros de raciocínio do modelo não são detectados.** Num teste, a Marina disse que o violão de R$ 459,90 era "o mais barato" de uma lista que tinha um de R$ 429,90. Os preços citados estavam certos, então a checagem não pegou. A solução seria uma ferramenta de ordenação, ou deixar a seleção do "mais barato" no código.
+- **Respostas variam entre execuções.** O mesmo pedido pode gerar listas diferentes ou chamadas de ferramentas desnecessárias (por exemplo, consultar o horário numa pergunta sobre frete).
+- **A checagem corrige uma vez só.** Se o modelo errar de novo na reescrita, a resposta sai assim.
+- **Frete para outras cidades não é calculado.** O manual diz que depende de CEP, peso e dimensões, dados que não temos. O agente explica as modalidades e encaminha para a equipe.
+- **Sem persistência:** o histórico se perde quando o servidor reinicia.
+- **Sem autenticação nem rate limit na API web.** Adequado para rodar localmente, não para expor publicamente.
+- **O loop do agente não tem testes automatizados.** Os testes cobrem ferramentas e regras; o comportamento do agente com o LLM foi validado com cenários executados manualmente.
+
+## O que faria com mais tempo
+
+1. **Avaliação automatizada:** um conjunto de 30 a 50 perguntas com respostas esperadas (preço correto, recusa correta, verificação exigida), rodado a cada mudança de prompt ou de modelo, para comparar modelos com números.
+2. **SQLite** como fonte dos dados, quando houver escrita (novos pedidos, reclamações registradas) e histórico persistente com política de retenção.
+3. **Encaminhamento real para humano:** hoje a Marina informa o prazo de 24h úteis, mas não cria um registro.
+4. **Integração com WhatsApp**, o canal citado no manual.
+5. **Ferramenta de cálculo de frete** a partir do CEP.
+
+---
+
+## Testes
+
+```bash
+python tests/test_data_loader.py   # 11 testes: carga, tipos, normalização, verificação, promoção, PIX
+python tests/test_policies.py      # 4 testes: manual extraído, horário, sábado, domingo e Finados
+```
+
+---
+
+## Estrutura
+
+```
+├── data/                     # CSVs e manual em PDF fornecidos (não alterados)
 ├── src/
-│   ├── __init__.py
-│   ├── main.py                  # CLI interativa (entry point)
-│   ├── agent.py                 # MusicaAgent com ReAct loop
-│   ├── prompts.py               # System prompt + tools definition
-│   ├── data_loader.py           # DataLoader: carrega/normaliza CSVs
-│   ├── policies.py              # PolicyTools: extrai/busca PDF
+│   ├── web.py                # FastAPI: home page, /api/catalog, /api/chat
+│   ├── static/               # index.html, style.css, app.js
+│   ├── main.py               # CLI
+│   ├── agent.py              # loop de function calling + checagem das respostas
+│   ├── prompts.py            # persona, regras e definição das ferramentas
+│   ├── data_loader.py        # carga e limpeza dos CSVs
 │   └── tools/
-│       ├── __init__.py
-│       ├── products.py          # ProductTools (5 funções)
-│       ├── orders.py            # OrderTools (2 funções, verificação)
-│       └── policies.py          # PolicyTools (3 funções)
+│       ├── products.py       # catálogo, promoções, alternativas, status de busca
+│       ├── orders.py         # pedidos com verificação de identidade
+│       └── policies.py       # leitura do manual e horário de funcionamento
 ├── tests/
-│   └── test_data_loader.py      # 10 testes unitários
-├── examples/                    # 5 exemplos de conversas
-│   ├── 01_busca_violoes.md       # Busca + promoção
-│   ├── 02_politica_devolucao.md  # Política + pedido
-│   ├── 03_status_pedido.md       # Multi-turno + verificação
-│   ├── 04_fora_do_escopo.md      # Redirecionamento
-│   └── 05_produto_sem_estoque.md # Alternativas (COMPLEXO)
-└── docs/
-    └── ai_workflow.md           # Log do processo de desenvolvimento
+├── examples/
+└── docs/ai_workflow.md       # registro do uso de IA etapa por etapa
 ```
 
 ---
 
-## 🤖 Uso de IA no Desenvolvimento
+## Uso de assistentes de código
 
-### Workflow Real
+Usei o **Claude** em dois papéis:
+- **Claude (chat):** entender o case e montar o briefing do projeto (`CLAUDE.md`), com contexto, requisitos, direção técnica sugerida e um checklist de entrega.
+- **Claude Code (extensão do VS Code):** explorar os dados, propor o plano, implementar, testar e fazer os commits.
 
-**Ferramentas usadas:**
-- **Claude Chat (web)**: Análise do case, arquitetura, decisões
-- **Claude Code (VS Code extension)**: Implementação, testes, commits
+**Como foi o workflow:**
+1. **Briefing primeiro.** O `CLAUDE.md` define que o assistente explora os dados e propõe um plano antes de escrever código, e que eu aprovo cada decisão. Eu escolhi a arquitetura (function calling), o provedor (OpenRouter, para não pagar outra API) e as regras de negócio. Um exemplo: "se não está no banco, a loja não vende".
+2. **Commits pequenos.** Cada passo lógico vira um commit, como o processo pede.
+3. **Testar de verdade mudou o resultado.** A primeira versão foi escrita sem ser executada. Quando rodei na minha máquina, nada funcionava: o modelo estava fixo no código, as ferramentas estavam no formato errado para a API e os testes de telefone esperavam o número de dígitos errado. A partir daí, passei a exigir que cada mudança fosse testada de ponta a ponta com o LLM antes do commit. Foi nesses testes que apareceram o "sem estoque" para atabaque, o preço inventado e a negação de produtos que a loja vende. As soluções estão nas decisões 3 e 4.
+4. **Revisão crítica.** Pedi ao assistente que apontasse o que estava errado no próprio trabalho. Isso levou a reescrever este README, que antes afirmava coisas não verificadas, e a refazer os exemplos de conversa, que tinham sido escritos à mão.
 
-**Processo:**
-1. **Análise (Chat):** Explorar dados, validar suposições, propor plano
-2. **Aprovação (Você):** Revisar e validar decisões
-3. **Implementação (Code):** Escrever código, fazer commits incrementais
-4. **Validação (Manual):** Testar exemplos, revisar exemplos de conversa
-
-### Como Claude ajudou
-
-| Etapa | Claude | Resultado |
-|-------|--------|----------|
-| **Análise de Dados** | Explorou CSVs, extraiu padrões | Identificou 65 produtos, 50 clientes, schema limpo |
-| **Arquitetura** | Comparou ReAct vs. RAG vs. SQL | Recomendou ReAct + function calling (acertou!) |
-| **Código** | Escreveu data_loader, tools, agent | 1500+ linhas, bem estruturado |
-| **Testes** | Criou 10 testes sem LLM | Cobertura de normalização e busca |
-| **Exemplos** | Gerou 5 conversas realistas | Cobrem todos os cenários (inclusive complexo) |
-| **Documentação** | Escreveu README, comments | Este arquivo, pronto para entrega |
-
-### Prompts Efetivos Usados
-
-```
-"Explore data/: liste arquivos, inspecione schema, amostras, nulos, 
-inconsistências. Traga resumo técnico."
-
-"Proponha arquitetura com: decisões técnicas + justificativa + 
-alternativas descartadas + ferramentas com assinatura"
-
-"Crie data_loader.py com normalização de acentos e tipos, testes 
-determinísticos, verificação de cliente por 3 vias"
-
-"Escreva agent.py com ReAct loop: Claude + tool calling + histórico 
-+ tratamento de erros"
-```
-
----
-
-## 📈 Métricas & Performance
-
-### Tamanho do Código
-- `src/`: ~1500 linhas (bem documentado)
-- `tests/`: ~150 linhas (10 testes)
-- `examples/`: ~400 linhas (5 exemplos)
-- Total: ~2000 linhas
-
-### Latência
-- **Primeira resposta:** ~1s (carregamento de dados)
-- **Respostas subsequentes:** ~300-800ms (depends on tool calls)
-- **Sem tool call:** ~200ms (apenas texto)
-
-### Tamanho dos Dados
-- CSVs: ~200 KB
-- PDF: ~180 KB
-- Total: ~380 KB (cabe em qualquer storage)
-
----
-
-## 📚 Referências
-
-### Documentos no Repositório
-- `docs/ai_workflow.md` — Log do processo passo a passo
-- `examples/*.md` — 5 conversas com explicações
-- `.env.example` — Variáveis de ambiente
-- `requirements.txt` — Dependências exatas (pinadas)
-
-### Bibliotecas Chave
-- **anthropic** (0.28.0): SDK do Claude
-- **pandas** (2.1.3): Manipulação de dados
-- **pdfplumber** (0.10.3): Extração de PDF
-- **fuzzywuzzy** (0.18.0): Busca fuzzy por nome
-- **python-dotenv** (1.0.0): Variáveis de ambiente
-
----
-
-## ✅ Checklist de Entrega (do CLAUDE.md)
-
-- [x] Repositório público no GitHub
-- [x] Abre sem login
-- [x] Roda do zero seguindo apenas README
-- [x] `.env` fora do repo; `.env.example` presente
-- [x] Histórico com vários commits de progresso real (não squash)
-- [x] Persona consistente; recusa fora do escopo funciona
-- [x] Agente consulta dados vs. políticas corretamente
-- [x] Nenhum preço/estoque inventado nos exemplos
-- [x] 3–5 conversas em `examples/`, ≥1 não trivial
-- [x] README: instruções, decisões, suposições, limitações, uso de IA
-- [x] Link enviado por e-mail até 03/11; nada alterado depois
-
----
-
-## 📧 Dúvidas?
-
-Se algo estiver ambíguo ou não funcionar:
-1. Verifique `docs/ai_workflow.md` (log do desenvolvimento)
-2. Consulte exemplos em `examples/` (5 cenários reais)
-3. Teste isoladamente: `python tests/test_data_loader.py`
-
----
-
-**Desenvolvido com:**  
-🤖 Claude (Anthropic) — Análise e arquitetura  
-💻 Claude Code — Implementação e commits  
-⏰ 01/11 – 03/11/2026 (3 dias úteis)
-
-**Repositório:** https://github.com/Pedroporto87/artefact-emporio-musica-agent
+O registro etapa por etapa (o que pedi, o que o assistente fez, o que revisei) está em [docs/ai_workflow.md](docs/ai_workflow.md).

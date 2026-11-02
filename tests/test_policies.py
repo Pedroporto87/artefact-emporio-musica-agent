@@ -1,12 +1,12 @@
 """Testes do manual e do horário de funcionamento (sem chamar o LLM)."""
 
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from tools.policies import CAMPO_GRANDE_TZ, load_manual_text, store_status
+from tools.policies import CAMPO_GRANDE_TZ, easter_sunday, holiday_name, load_manual_text, store_status
 
 
 def at(day: str, hour: int, minute: int = 0) -> datetime:
@@ -39,3 +39,22 @@ def test_sunday_and_holiday_closed():
     finados = store_status(at("2026-11-02", 11))  # segunda-feira, feriado de Finados
     assert finados["loja_aberta_agora"] is False and finados["feriado"] == "Finados"
     assert finados["proxima_abertura"] == "terça-feira, 03/11 às 09:00"
+
+
+def test_easter_known_years():
+    assert easter_sunday(2025) == date(2025, 4, 20)
+    assert easter_sunday(2026) == date(2026, 4, 5)
+    assert easter_sunday(2027) == date(2027, 3, 28)
+
+
+def test_movable_holidays_2026():
+    assert holiday_name(date(2026, 2, 16)) == "Carnaval"
+    assert holiday_name(date(2026, 2, 17)) == "Carnaval"
+    assert holiday_name(date(2026, 2, 18)) is None  # Quarta-feira de Cinzas
+    assert holiday_name(date(2026, 4, 3)) == "Sexta-feira Santa"
+    assert holiday_name(date(2026, 6, 4)) == "Corpus Christi"
+
+
+def test_next_opening_skips_carnival():
+    status = store_status(at("2026-02-14", 14))  # sábado, depois das 13h
+    assert status["proxima_abertura"] == "quarta-feira, 18/02 às 09:00"

@@ -1,6 +1,6 @@
 """Manual de políticas (PDF) e status de funcionamento da loja."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -17,7 +17,6 @@ WEEKDAYS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "se
 # Seção 2 do manual: seg-sex 09-18, sáb 09-13, domingo e feriados fechado.
 OPENING_HOURS: Dict[int, Tuple[int, int]] = {0: (9, 18), 1: (9, 18), 2: (9, 18), 3: (9, 18), 4: (9, 18), 5: (9, 13)}
 
-# Só feriados nacionais de data fixa; os móveis (Carnaval, Sexta-feira Santa, Corpus Christi) ficam de fora.
 FIXED_HOLIDAYS = {
     (1, 1): "Confraternização Universal",
     (4, 21): "Tiradentes",
@@ -30,6 +29,37 @@ FIXED_HOLIDAYS = {
     (12, 25): "Natal",
 }
 
+# Feriados móveis, em dias a partir do domingo de Páscoa. Só a Sexta-feira Santa é feriado
+# nacional; Carnaval e Corpus Christi são ponto facultativo, mas a loja é tratada como fechada.
+EASTER_OFFSETS = {
+    -48: "Carnaval",
+    -47: "Carnaval",
+    -2: "Sexta-feira Santa",
+    60: "Corpus Christi",
+}
+
+
+def easter_sunday(year: int) -> date:
+    """Páscoa no calendário gregoriano (algoritmo de Meeus/Jones/Butcher)."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    g = (8 * b + 13) // 25
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 19 * l) // 433
+    month = (h + l - 7 * m + 90) // 25
+    day = (h + l - 7 * m + 33 * month + 19) % 32
+    return date(year, month, day)
+
+
+def holiday_name(day: date) -> Optional[str]:
+    fixed = FIXED_HOLIDAYS.get((day.month, day.day))
+    if fixed:
+        return fixed
+    return EASTER_OFFSETS.get((day - easter_sunday(day.year)).days)
+
 
 @lru_cache(maxsize=1)
 def load_manual_text(path: Path = MANUAL_PATH) -> str:
@@ -39,7 +69,7 @@ def load_manual_text(path: Path = MANUAL_PATH) -> str:
 
 
 def _hours_for(day: datetime) -> Optional[Tuple[int, int]]:
-    if (day.month, day.day) in FIXED_HOLIDAYS:
+    if holiday_name(day.date()):
         return None
     return OPENING_HOURS.get(day.weekday())
 
@@ -61,7 +91,7 @@ def store_status(now: Optional[datetime] = None) -> Dict:
     is_open = hours is not None and hours[0] <= now.hour < hours[1]
     return {
         "agora": f"{WEEKDAYS[now.weekday()]}, {now:%d/%m/%Y %H:%M}",
-        "feriado": FIXED_HOLIDAYS.get((now.month, now.day)),
+        "feriado": holiday_name(now.date()),
         "loja_aberta_agora": is_open,
         "horario_de_hoje": f"{hours[0]:02d}:00 às {hours[1]:02d}:00" if hours else "fechado",
         "proxima_abertura": None if is_open else _next_opening(now),
